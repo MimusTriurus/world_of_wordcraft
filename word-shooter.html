@@ -102,7 +102,8 @@
   </div>
   <div class="hint">
     <kbd>Enter</kbd> — начать игру · <b>мышь</b> — наводить пушку (или <kbd>←</kbd> <kbd>→</kbd>)<br>
-    Наведи ствол на <b>сам пропуск</b> и напечатай недостающую букву<br>
+    Наведи пушку на блок и напечатай <b>недостающую букву</b> — встанет сама<br>
+    С 7-го уровня целиться нужно уже в <b>сам пропуск</b><br>
     <b>клик</b> или <kbd>Space</kbd> — подрыв блока на линии огня · <kbd>Esc</kbd> пауза
   </div>
 </div>
@@ -420,15 +421,16 @@
   // половину, тогда как раньше утраивалась.
   const LEVELS = [
     // len — длина слова, rank — предел частотности (чем больше, тем реже
-    // слово встречается в речи), gaps2 — доля блоков с двумя пропусками
-    { len: [3, 4], rank:  1500, gaps2: 0,    speed: 20 },
-    { len: [3, 5], rank:  1500, gaps2: 0,    speed: 21 },
-    { len: [3, 5], rank:  4000, gaps2: 0,    speed: 22 },
-    { len: [4, 6], rank:  4000, gaps2: 0,    speed: 23 },
-    { len: [4, 6], rank: 10000, gaps2: 0.2,  speed: 24 },
-    { len: [4, 7], rank: 10000, gaps2: 0.35, speed: 26 },
-    { len: [5, 7], rank: 99999, gaps2: 0.5,  speed: 28 },
-    { len: [5, 8], rank: 99999, gaps2: 0.65, speed: 30 },
+    // слово встречается в речи), gaps2 — доля блоков с двумя пропусками,
+    // aim — целиться нужно в саму букву, а не просто в блок
+    { len: [3, 4], rank:  1500, gaps2: 0,    aim: false, speed: 20 },
+    { len: [3, 5], rank:  1500, gaps2: 0,    aim: false, speed: 21 },
+    { len: [3, 5], rank:  4000, gaps2: 0,    aim: false, speed: 22 },
+    { len: [4, 6], rank:  4000, gaps2: 0,    aim: false, speed: 23 },
+    { len: [4, 6], rank: 10000, gaps2: 0.2,  aim: false, speed: 24 },
+    { len: [4, 7], rank: 10000, gaps2: 0.35, aim: false, speed: 26 },
+    { len: [5, 7], rank: 99999, gaps2: 0.5,  aim: true,  speed: 27 },
+    { len: [5, 8], rank: 99999, gaps2: 0.65, aim: true,  speed: 29 },
   ];
   const WORDS_PER_LEVEL = 8;
 
@@ -465,6 +467,9 @@
       shown: word.split("").map((ch, i) => gaps.includes(i) ? "" : ch),
       gaps,
       rank: info(word).rank,                 // редкость загаданного, не собранного
+      // правило наводки запоминаем при появлении: блок, взлетевший при старых
+      // правилах, не должен посреди полёта потребовать точного прицела
+      aim: r.aim,
       // все слова, которые ещё могут получиться: из них считаются верные буквы
       options: [word, ...info(word).neighbours],
       w, h: 40,
@@ -501,6 +506,14 @@
     const out = new Set();
     for (const o of b.options) out.add(o[i]);
     return out;
+  }
+
+  // Куда сама встанет буква, если целиться необязательно: первый слева
+  // незакрытый пропуск, которому она подходит. -1 — не подходит никуда.
+  function gapFor(b, letter) {
+    for (const i of b.gaps)
+      if (!b.shown[i] && acceptsAt(b, i).has(letter)) return i;
+    return -1;
   }
 
   // Номер буквы под выстрелом — сетка ячеек внутри блока.
@@ -676,9 +689,11 @@
         if (s.x < b.x || s.x > b.x + b.w) continue;
         if (s.y > b.y + b.h || s.y < b.y) continue;
 
-        // Куда именно попали: пропуск наводится по горизонтали, как и блок.
-        const i = cellAt(b, s.x);
-        if (i === -1 || b.shown[i]) miss(b, "Тут уже<br>есть буква:");
+        // Пока точный прицел не включён, хватает попадания в блок: буква сама
+        // встаёт в подходящий пропуск. С b.aim целиться нужно в саму ячейку.
+        const i = b.aim ? cellAt(b, s.x) : gapFor(b, s.letter);
+        if (i === -1) miss(b, b.aim ? "Мимо буквы:" : "Не подходит:");
+        else if (b.shown[i]) miss(b, "Тут уже<br>есть буква:");
         else if (acceptsAt(b, i).has(s.letter)) fill(b, i, s.letter);
         else miss(b, "Не подходит:");
         return true;
@@ -794,8 +809,10 @@
     ctx.textBaseline = "middle";
     const step = (b.w - 26) / b.word.length;
     const startX = b.x + 13 + step / 2;
-    // ячейка, в которую сейчас смотрит ствол
-    const aimedCell = isTarget && !solvedNow && !dead ? cellAt(b, cannonX) : -1;
+    // ячейка, в которую смотрит ствол; без точного прицела не подсвечиваем,
+    // чтобы не намекать на выбор, которого у игрока пока нет
+    const aimedCell = b.aim && isTarget && !solvedNow && !dead
+      ? cellAt(b, cannonX) : -1;
 
     for (let i = 0; i < b.word.length; i++) {
       const cx = startX + i * step, cy = b.y + b.h / 2 + 1;
@@ -902,6 +919,7 @@
                : r.rank <= 10000 ? "+ редкие" : "любые";
     el.rules.innerHTML = `${r.len[0]}–${r.len[1]} букв · ${band}` +
       (r.gaps2 > 0 ? `<br>до 2 пропусков` : "") +
+      (r.aim ? `<br>прицел по букве` : "") +
       `<br>скорость ${Math.round(r.speed)}`;
   }
 
