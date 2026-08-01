@@ -1,17 +1,18 @@
 // Генератор словарных данных для word-shooter.html.
 //
-// Игра берёт слова для блоков из курируемого списка WORDS внутри самой игры.
-// Этот скрипт качает частотные корпуса и вшивает в игру, между маркерами
-// WORDLIST, по две вещи на каждое такое слово:
+// Качает частотные корпуса и вшивает в игру, между маркерами WORDLIST, список
+// слов в порядке частотности. Игра берёт из него сразу два:
 //
-//   ранг     — место в частотном списке. Ось сложности: чем реже слово
-//              встречается в речи, тем позже оно появляется в игре.
-//   соседи   — настоящие слова той же длины, отличающиеся не более чем двумя
-//              буквами. Из них считается, какие буквы засчитывать в пропуски:
-//              Л_С — это и ЛЕС, и ЛИС, а И__А — и ИГРА, и ИГЛА, и ИКРА.
+//   слова для блоков — место в списке задаёт ось сложности «насколько слово
+//                      ходовое», а сам список настолько велик, что слова
+//                      почти не повторяются;
+//   проверку ответа  — соседей (слова той же длины, отличающиеся на одну-две
+//                      буквы) игра считает на лету по этому же списку.
+//                      Л_С — это и ЛЕС, и ЛИС, а И__А — и ИГРА, и ИГЛА.
 //
-// Соседей достаточно двух замен, потому что больше двух пропусков в блоке
-// не бывает. Возить в игре весь корпус ради этого не нужно.
+// Раньше соседи считались здесь и вшивались на каждое слово отдельно. Пока
+// слов для блоков было около сотни, так выходило дешевле; со списком на
+// тридцать тысяч общий корпус занимает меньше, чем его же соседи россыпью.
 //
 //   node tools/build-wordlist.mjs            скачать и пересобрать
 //   node tools/build-wordlist.mjs --cache    взять уже скачанное из tools/.cache
@@ -24,15 +25,6 @@ import { fileURLToPath } from "node:url";
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const GAME = path.join(ROOT, "word-shooter.html");
 const CACHE = path.join(ROOT, "tools", ".cache");
-
-// Сколько букв игра может выбить из слова. В коротком слове два пропуска
-// оставляют одну известную букву — это уже не загадка, а лотерея, поэтому
-// глубина растёт вместе с длиной. Отсюда же и глубина поиска соседей.
-const maxGaps = len => (len <= 4 ? 1 : 2);
-
-// Сколько соседей держать на слово: список отсортирован по частотности,
-// хвост из редкой экзотики только раздувает файл.
-const NEIGHBOUR_CAP = 120;
 
 const SOURCES = {
   ru: {
@@ -47,7 +39,21 @@ const SOURCES = {
     // Корпус собран по субтитрам и полон мата. Слово из словаря может стать
     // ответом, а игра показывает достроенное слово на экране — поэтому чистим.
     // Английский список берётся в варианте no-swears, там это уже сделано.
-    deny: /^(ху[йеяю]|пизд|[е]б[ауеиоНн]|бля|сук[аиуе]$|муд[ао]|г[ао]ндон|залуп|дроч|говн|срак|жоп|дерьм|шлюх|мраз|пид[оа]р|хер[аоуни]|манда$|елда|минет|отсос|трах[ан]|сперм|очко$)/,
+    // Корень ищем где угодно в слове: «нахер» и «похрен» мимо привязки к началу.
+    deny: /(ху[йеяю]|пизд|бляд|ебан|ебат|ебал|сука|суки|мудак|муди|г[ао]ндон|залуп|дроч|говн|срак|жопа|дерьм|шлюх|пид[оа]р|хер|хрен|манда|елда|минет|отсос|трах|сперм|нафиг)/,
+    // Субтитры — это диалоги, и верхушку списка держат имена. Как загадка
+    // «ДЖ_Н» бессмысленна: угадывать нечего. Список неполный по определению,
+    // редкие имена всё равно просочатся.
+    denyWords: ("джон джек джим майк мэри сара сэм том тим бен билл боб дэн дэйв дэвид крис " +
+      "пол питер пит рик рон стив тед фрэнк чарли эдди энди эрик джейн джули кейт лиза линда " +
+      "мэг нэнси рэйчел салли сьюзан хелен эмма джордж генри гарри ларри марк мартин митч ник " +
+      "норман оскар патрик рэй роберт роджер скотт тайлер уолтер фил хэнк хосе хуан элли эмили " +
+      "эрни джейк джейсон джефф джерри джина джоан джоди джоуи диана дон дуглас ева иден " +
+      "картер кевин келли ким клара клод коул колин конор лана лео лестер луис люк макс мия " +
+      "молли моника нейт нора оливия пенни перри рита рут райан саймон стэн тара тесс тина " +
+      "тодд тони трейси уилл уэйд шон элис элла эндрю эшли иван петр саша маша ольга сергей " +
+      "андрей алексей дима вася коля миша наташа таня лена катя оля юля игорь борис павел " +
+      "роман денис артем виктор антон юра валера гена").split(" "),
   },
   en: {
     url: "https://raw.githubusercontent.com/first20hours/google-10000-english/master/google-10000-english-no-swears.txt",
@@ -56,6 +62,13 @@ const SOURCES = {
     // одно слово в строке, уже по убыванию частоты
     parse: line => line.trim(),
     valid: /^[a-z]{3,8}$/,
+    denyWords: ("john jack jim mike mary sarah sam tom tim ben bill bob dan dave david chris " +
+      "paul peter pete rick ron steve ted frank charlie eddie andy eric jane julie kate lisa " +
+      "linda nancy sally susan helen emma george henry harry larry mark martin mitch nick " +
+      "oscar patrick ray robert roger scott tyler walter phil hank jose juan emily jake jason " +
+      "jeff jerry gina joan joey diana kevin kelly kim clara cole colin lana leo lester luis " +
+      "luke max mia molly monica nate nora olivia penny perry rita ruth ryan simon stan tara " +
+      "tess tina todd tony tracy sean alice ella andrew ashley").split(" "),
   },
 };
 
@@ -77,43 +90,38 @@ async function fetchList(key) {
 
 // слово -> место в частотном списке, плюс сам список чистых слов
 function corpus(text, src) {
+  const names = new Set(src.denyWords || []);
   const rank = new Map();
+  let dropped = 0;
   for (const line of text.split(/\r?\n/)) {
     let w = src.parse(line).toLowerCase();
     if (src.normalize) w = src.normalize(w);
     if (!src.valid.test(w)) continue;
-    if (src.deny?.test(w)) continue;
+    if (src.deny?.test(w) || names.has(w)) { dropped++; continue; }
     if (!rank.has(w)) rank.set(w, rank.size + 1);
   }
-  return rank;
-}
-
-function distance(a, b, limit) {
-  let d = 0;
-  for (let i = 0; i < a.length; i++) if (a[i] !== b[i] && ++d > limit) return d;
-  return d;
-}
-
-// Курируемый список слов лежит в самой игре — читаем его оттуда,
-// чтобы данные не разъехались с тем, что реально спавнится.
-function spawnWords(html, key) {
-  const block = html.match(new RegExp(`\\n    ${key}: \\(([\\s\\S]*?)\\)\\.split`));
-  if (!block) throw new Error(`не нашёл WORDS.${key} в word-shooter.html`);
-  return (block[1].match(/"([^"]*)"/g) || [])
-    .map(s => s.slice(1, -1)).join("").split(" ").filter(Boolean);
+  return { rank, dropped };
 }
 
 const START = "  // >>> WORDLIST START <<<";
 const END = "  // >>> WORDLIST END <<<";
 
+// Порядок слов в строке = порядок частотности, по нему игра и считает ранг.
 function renderBlock(data) {
-  const lines = [START, "  const META = {"];
+  const lines = [START, "  const CORPUS = {"];
   for (const key of ["ru", "en"]) {
-    const { entries, url } = data[key];
-    lines.push(`    // ${entries.length} слов, ранг и соседи из ${url}`);
+    const { words, url } = data[key];
+    lines.push(`    // ${words.length} слов по убыванию частотности, ${url}`);
     lines.push(`    ${key}:`);
-    lines.push(entries.map((e, i) =>
-      `      "${e}${i === entries.length - 1 ? "" : ";"}"`).join(" +\n") + ",");
+    const chunks = [];
+    let line = "";
+    for (const w of words) {
+      if (line.length + w.length + 1 > 100) { chunks.push(line); line = ""; }
+      line += (line ? " " : "") + w;
+    }
+    if (line) chunks.push(line);
+    lines.push(chunks.map((c, i) =>
+      `      "${c}${i === chunks.length - 1 ? "" : " "}"`).join(" +\n") + ",");
   }
   lines.push("  };", END);
   return lines.join("\n");
@@ -124,35 +132,15 @@ const data = {};
 
 for (const key of ["ru", "en"]) {
   const src = SOURCES[key];
-  const rank = corpus(await fetchList(key), src);
-  const spawn = spawnWords(html, key);
+  const { rank, dropped } = corpus(await fetchList(key), src);
+  const words = [...rank.keys()];
+  data[key] = { words, url: src.url };
 
-  // группируем корпус по длине — сравнивать имеет смысл только равные длины
-  const byLen = new Map();
-  for (const w of rank.keys()) {
-    if (!byLen.has(w.length)) byLen.set(w.length, []);
-    byLen.get(w.length).push(w);
-  }
-
-  let missing = 0, totalNb = 0;
-  const entries = spawn.map(word => {
-    const r = rank.get(word);
-    if (r === undefined) missing++;
-    const limit = maxGaps(word.length);
-    const nb = (byLen.get(word.length) || [])
-      .filter(w => w !== word && distance(word, w, limit) <= limit)
-      .sort((a, b) => rank.get(a) - rank.get(b))
-      .slice(0, NEIGHBOUR_CAP);
-    totalNb += nb.length;
-    // ранга нет — считаем слово редким, пусть достаётся поздним уровням
-    return [word, r ?? 99999, ...nb].join(" ");
-  });
-
-  data[key] = { entries, url: src.url };
+  const byLen = {};
+  for (const w of words) byLen[w.length] = (byLen[w.length] || 0) + 1;
   process.stdout.write(
-    `${key}: ${spawn.length} слов в блоках, ${rank.size} слов в корпусе, ` +
-    `соседей всего ${totalNb} (в среднем ${(totalNb / spawn.length).toFixed(1)} на слово)` +
-    (missing ? `, без ранга: ${missing}` : "") + "\n");
+    `${key}: ${words.length} слов (отсеяно матом и именами: ${dropped}), ` +
+    Object.entries(byLen).map(([l, n]) => `${l}:${n}`).join(" ") + "\n");
 }
 
 const from = html.indexOf(START);
