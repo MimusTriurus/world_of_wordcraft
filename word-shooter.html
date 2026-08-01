@@ -3887,11 +3887,14 @@
   const STAGES = [
     // У длинных слов одного пропуска нет вовсе: открытых букв столько, что
     // слово угадывается с ходу. Длинные сразу идут с двумя пропусками.
-    { name: "КОРОТКИЕ СЛОВА",     len: [3, 4], gaps: 1, speed: 20, load:  5.5, quota: 10 },
-    { name: "КОРОТКИЕ, БЫСТРЕЕ",  len: [3, 4], gaps: 1, speed: 32, load:  6.0, quota: 10 },
-    { name: "ДЛИННЫЕ СЛОВА",      len: [5, 7], gaps: 2, speed: 20, load:  9.0, quota: 10 },
-    { name: "ДЛИННЫЕ, БЫСТРЕЕ",   len: [5, 7], gaps: 2, speed: 26, load:  9.5, quota: 10 },
-    { name: "ФИНАЛ",              len: [8, 8], gaps: 3, speed: 10, load: 12.0, quota:  1 },
+    //
+    // fits — цель по «прощаемости»: сколько букв должно подходить в пропуск.
+    // Позиция пропуска выбирается под эту цель, а не наугад, см. pickGaps.
+    { name: "КОРОТКИЕ СЛОВА",     len: [3, 4], gaps: 1, fits: 3, speed: 20, load:  5.5, quota: 10 },
+    { name: "КОРОТКИЕ, БЫСТРЕЕ",  len: [3, 4], gaps: 1, fits: 2, speed: 32, load:  6.0, quota: 10 },
+    { name: "ДЛИННЫЕ СЛОВА",      len: [5, 7], gaps: 2, fits: 2, speed: 20, load:  9.0, quota: 10 },
+    { name: "ДЛИННЫЕ, БЫСТРЕЕ",   len: [5, 7], gaps: 2, fits: 1, speed: 26, load:  9.5, quota: 10 },
+    { name: "ФИНАЛ",              len: [8, 8], gaps: 3, fits: 1, speed: 10, load: 12.0, quota:  1 },
   ];
 
   // Цена блока в «единицах внимания». Длинное, редкое и дырявое слово
@@ -3991,6 +3994,53 @@
     return null;
   }
 
+  // ------------------------------------------------------ выбор пропусков
+  // Сколько букв встанет в пропуск, если выбить ровно эту позицию. Считается
+  // одним проходом по корзине слов той же длины: сосед, отличающийся ровно
+  // в одной позиции, добавляет вариант именно ей.
+  function gapChoices(word) {
+    const n = new Array(word.length).fill(1);        // сама загаданная буква
+    for (const w of BY_LEN[lang].get(word.length) || []) {
+      if (w === word) continue;
+      let at = -1, d = 0;
+      for (let k = 0; k < word.length && d <= 1; k++) if (w[k] !== word[k]) { d++; at = k; }
+      if (d === 1) n[at]++;
+    }
+    return n;
+  }
+
+  // Позиция пропуска — самый сильный рычаг сложности, и раньше он был отдан
+  // случаю. Замеры по корпусу: в русском последняя буква принимает в среднем
+  // 2.1 варианта, а вторая — 1.19, то есть почти вдвое строже. В английском
+  // всё наоборот, легче первая. Поэтому целимся не в позицию, а в число
+  // подходящих букв, и язык сам решает, где эта позиция окажется.
+  function pickGaps(word, count, target) {
+    const fits = gapChoices(word);
+    const gaps = [];
+    const free = word.split("").map((_, i) => i);
+
+    while (gaps.length < count && free.length) {
+      // Соседние пропуски мягче разнесённых (1.85 против 1.56 подходящих):
+      // разнесённые пришпиливают слово с двух сторон. Когда просят строгости,
+      // второй пропуск уводим от первого, когда мягкости — ставим рядом.
+      const wantNear = target > 1.5 && gaps.length > 0;
+      let best = [], bestScore = Infinity;
+      for (const i of free) {
+        let s = Math.abs(fits[i] - target);
+        if (gaps.length) {
+          const near = gaps.some(g => Math.abs(g - i) === 1);
+          s += wantNear ? (near ? 0 : 0.5) : (near ? 0.5 : 0);
+        }
+        if (s < bestScore - 1e-9) { bestScore = s; best = [i]; }
+        else if (s < bestScore + 1e-9) best.push(i);
+      }
+      const pick = best[(Math.random() * best.length) | 0];
+      gaps.push(pick);
+      free.splice(free.indexOf(pick), 1);
+    }
+    return gaps.sort((a, b) => a - b);
+  }
+
   // ------------------------------------------------------------ блоки-слова
   function makeBlock() {
     const r = rules();
@@ -3999,13 +4049,7 @@
     // Пропусков ровно столько, сколько задал этап, но две буквы в слове
     // всегда остаются открытыми: иначе угадывать не по чему.
     const gapCount = Math.min(r.gaps, word.length - 2);
-
-    const gaps = [];
-    while (gaps.length < gapCount) {
-      const i = (Math.random() * word.length) | 0;
-      if (!gaps.includes(i)) gaps.push(i);
-    }
-    gaps.sort((a, b) => a - b);
+    const gaps = pickGaps(word, gapCount, r.fits);
 
     const w = 26 + word.length * 21;
     const b = {
