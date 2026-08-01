@@ -33,10 +33,18 @@ export function makeTrack() { return { len: 0, rank: 0, gaps: 0, speed: 0, load:
 
 export function rulesFrom(track, ramp = 1) {
   const hi = LADDER.len.steps[track.len];
+  const gaps2 = LADDER.gaps.steps[track.gaps];
   return {
+    name: "ВОЛНА",
     len: [Math.max(3, hi - 3), hi],
     rank: LADDER.rank.steps[track.rank],
-    gaps2: LADDER.gaps.steps[track.gaps],
+    gaps2,
+    // Движок с тех пор перешёл на точное число пропусков и квоту этапа.
+    // Долю блоков с двумя пропусками он больше не понимает, так что здесь она
+    // огрубляется до одного или двух, а квота ставится заведомо недостижимой:
+    // волна кончается по счёту слов в самом симуляторе, а не в игре.
+    gaps: gaps2 >= 0.5 ? 2 : 1,
+    quota: Infinity,
     speed: LADDER.speed.steps[track.speed],
     load: (LADDER.load.base + track.load * LADDER.load.unit) * ramp,
   };

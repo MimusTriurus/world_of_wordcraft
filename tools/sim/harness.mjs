@@ -29,18 +29,18 @@ export function boot(seed = 1) {
   const close = raw.lastIndexOf("</script>");
   let src = raw.slice(open + 8, close);
 
-  // единственная правка логики: волновой контроллер подменяет правила уровня
-  src = src.replace("  function rules() {",
-    "  function rules() {\n    if (globalThis.__rules) return globalThis.__rules;");
-  if (!src.includes("globalThis.__rules")) throw new Error("не нашёл rules()");
+  // единственная правка логики: волновой контроллер подменяет правила этапа
+  const RULES = "  const rules = () =>";
+  if (!src.includes(RULES)) throw new Error("не нашёл rules()");
+  src = src.replace(RULES, "  const rules = () => globalThis.__rules ||");
 
   const exportCode = `
   globalThis.__t = {
     update, reset, spawn, blockCost, fieldLoad, alive, rules, solve, bombAll,
-    DANGER_Y, CANNON_Y, WORDS_PER_LEVEL,
+    DANGER_Y, CANNON_Y, STAGES,
     get blocks() { return blocks; },
     get state() { return state; },  set state(v) { state = v; },
-    get level() { return level; },  set level(v) { level = v; },
+    get stage() { return stage; },  set stage(v) { stage = v; },
     get lives() { return lives; },  get solved() { return solved; },
     get bombs() { return bombs; },  set bombs(v) { bombs = v; },
     get score() { return score; },

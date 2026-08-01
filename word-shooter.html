@@ -88,7 +88,7 @@
     <canvas id="game"></canvas>
     <div class="hud">
       <div class="label">SCORE</div><div class="value" id="score">0</div>
-      <div class="label">LEVEL</div><div class="value" id="level">1</div>
+      <div class="label">ЭТАП</div><div class="value" id="level">1</div>
       <div class="rules" id="rules"></div>
       <div class="label">COMBO</div><div class="value small" id="combo">x1</div>
       <div class="label">LIVES</div><div class="value small" id="lives">♥♥♥</div>
@@ -3709,7 +3709,8 @@
   // ------------------------------------------------------------------ стейт
   let lang = localStorage.getItem("ws-lang") || "ru";
   let blocks, shots, sparks, reveals;
-  let score, level, lives, bombs, combo, bestCombo, solved;
+  let score, lives, bombs, combo, bestCombo, solved;
+  let stage, stageSpawned, poolDry;   // номер этапа, сколько он выпустил, кончились ли слова
   let spawnTimer, state, shake, flash;
   const SPAWN_GAP = 600;         // мс между блоками — антизалп
   const SPAWN_RETRY = 200;       // мс до следующей попытки, если места нет
@@ -3855,15 +3856,17 @@
 
   function reset(startNow) {
     blocks = []; shots = []; sparks = []; reveals = [];
-    score = 0; level = 1; lives = 3; bombs = 3;
+    score = 0; lives = 3; bombs = 3;
     combo = 0; bestCombo = 0; solved = 0;
+    stage = 0; stageSpawned = 0; poolDry = false;
+    used.clear(); dropBag();
     spawnTimer = 400;
     shake = 0; flash = 0;
     cannonX = W / 2; cooldown = 0;
     held.left = held.right = false;
     if (startNow) {
       state = "play";
-      setMsg("Наведи пушку<br>и печатай букву.");
+      setMsg(STAGES[0].name + "<br>Наведи пушку<br>и печатай букву.");
     } else {
       toMenu();
     }
@@ -3871,24 +3874,24 @@
   }
 
   // ---------------------------------------------------------------- сложность
-  // Порядок рычагов сознательный: сначала растёт длина слова, потом в ход идут
-  // менее ходовые слова, потом появляется второй пропуск, и только в последнюю
-  // очередь ускоряются блоки. Скорость — самый грубый рычаг: она давит на
-  // моторику, а не на голову, поэтому за восемь уровней прибавляет всего
-  // половину, тогда как раньше утраивалась.
-  const LEVELS = [
-    // len — длина слова, rank — предел частотности (чем больше, тем реже
-    // слово встречается в речи), gaps2 — доля блоков с двумя пропусками,
-    // load — сколько «внимания» помещается на поле разом, см. blockCost.
-    // Точный прицел уровнем не управляется: это модификатор из меню.
-    { len: [3, 4], rank:  1500, gaps2: 0,    speed: 20, load:  5.0 },
-    { len: [3, 5], rank:  1500, gaps2: 0,    speed: 21, load:  5.6 },
-    { len: [3, 5], rank:  4000, gaps2: 0,    speed: 22, load:  6.2 },
-    { len: [4, 6], rank:  4000, gaps2: 0,    speed: 23, load:  6.9 },
-    { len: [4, 6], rank: 10000, gaps2: 0.2,  speed: 24, load:  7.6 },
-    { len: [4, 7], rank: 10000, gaps2: 0.35, speed: 26, load:  8.3 },
-    { len: [5, 7], rank: 99999, gaps2: 0.5,  speed: 27, load:  9.1 },
-    { len: [5, 8], rank: 99999, gaps2: 0.65, speed: 29, load: 10.0 },
+  // Забег — шесть этапов, идущих строго по очереди. Этапы не смешиваются:
+  // новый не начинается, пока поле не очистилось от предыдущего, а длины слов
+  // у них не пересекаются, так что «короткие» и «длинные» — разные наборы.
+  //
+  //   len   — длина слова, диапазоны этапов не перекрываются
+  //   gaps  — сколько букв выбито, ровно столько, а не «с вероятностью»
+  //   speed — px/s
+  //   load  — сколько «внимания» помещается на поле разом, см. blockCost
+  //   quota — сколько слов этап выпускает; после этого спавн молчит и этап
+  //           ждёт, пока поле опустеет
+  const STAGES = [
+    // У длинных слов одного пропуска нет вовсе: открытых букв столько, что
+    // слово угадывается с ходу. Длинные сразу идут с двумя пропусками.
+    { name: "КОРОТКИЕ СЛОВА",     len: [3, 4], gaps: 1, speed: 20, load:  5.5, quota: 10 },
+    { name: "КОРОТКИЕ, БЫСТРЕЕ",  len: [3, 4], gaps: 1, speed: 32, load:  6.0, quota: 10 },
+    { name: "ДЛИННЫЕ СЛОВА",      len: [5, 7], gaps: 2, speed: 20, load:  9.0, quota: 10 },
+    { name: "ДЛИННЫЕ, БЫСТРЕЕ",   len: [5, 7], gaps: 2, speed: 26, load:  9.5, quota: 10 },
+    { name: "ФИНАЛ",              len: [8, 8], gaps: 3, speed: 10, load: 12.0, quota:  1 },
   ];
 
   // Цена блока в «единицах внимания». Длинное, редкое и дырявое слово
@@ -3908,17 +3911,8 @@
   // новых слов, то есть снижала давление вместо того, чтобы повышать его.
   const fieldLoad = () =>
     blocks.reduce((sum, b) => alive(b) && !b.broken ? sum + blockCost(b) : sum, 0);
-  const WORDS_PER_LEVEL = 8;
 
-  function rules() {
-    const last = LEVELS[LEVELS.length - 1];
-    if (level <= LEVELS.length) return LEVELS[level - 1];
-    // дальше растут только скорость и бюджет поля
-    const over = level - LEVELS.length;
-    return { ...last, gaps2: 0.75,
-             speed: last.speed + over * 1.5,
-             load: Math.min(14, last.load + over * 0.4) };
-  }
+  const rules = () => STAGES[Math.min(stage, STAGES.length - 1)];
 
   // прицел задаёт игрок в меню, а не уровень
   function needsAim() { return mods.aim; }
@@ -3941,73 +3935,70 @@
     return p === "n" || (p === "v" && mods.verbs) || (p === "a" && mods.adjs);
   }
 
-  function eligible(w, r) {
-    if (w.length < r.len[0] || w.length > r.len[1]) return false;
+  function eligible(w, lo, hi) {
+    if (w.length < lo || w.length > hi) return false;
     if (SKIP[lang].has(w)) return false;
     if (!allowedPart(w)) return false;
-    // Тема отменяет отбор по частотности: пул темы и так собран вручную,
-    // а планка редкости выкосила бы из него почти всё.
+    // Тема заменяет отбор целиком: её пул и так собран вручную.
     if (mods.theme) return themesOf(w).includes(mods.theme);
-    const rank = rankOf(w);
-    if (rank > r.rank) return false;
-    return CURATED[lang].has(w) || (w.length >= 4 && rank > FUNCTION_WORDS);
+    return CURATED[lang].has(w) || (w.length >= 4 && rankOf(w) > FUNCTION_WORDS);
   }
 
-  // Мешок: пул перемешивается и разбирается без повторов, а не тянется
-  // случайно каждый раз. Плюс окно недавних слов, чтобы одно и то же не
-  // всплывало сразу после смены уровня, когда мешок собирается заново.
-  const bag = { key: "", words: [], at: 0 };
-  const recent = [];
-  const RECENT_WINDOW = 200;
+  // Пул забега. Слово вынимается и обратно не возвращается: used живёт всю
+  // партию, поэтому за забег ни одно слово не повторится — ни внутри этапа,
+  // ни между этапами, у которых длины слов совпадают.
+  const used = new Set();
+  const pool = { key: "", words: [], at: 0 };
 
-  const dropBag = () => { bag.key = ""; };   // модификаторы сменились — пул другой
+  const dropBag = () => { pool.key = ""; };   // модификаторы сменились — пул другой
 
-  // Ниже этого порога пул темы уже не режем по длине слова: в «Растениях»
-  // на коротком уровне осталось бы полтора десятка слов, и они пошли бы по кругу.
-  const THEME_MIN = 24;
+  function fillPool(r) {
+    const key = [lang, stage, mods.verbs, mods.adjs, mods.theme].join("|");
+    if (pool.key === key) return;
+    pool.key = key;
 
-  function refillBag(r) {
-    const key = [lang, r.len.join("-"), r.rank, mods.verbs, mods.adjs, mods.theme].join("|");
-    if (bag.key === key && bag.at < bag.words.length) return;
-    if (bag.key !== key) {
-      bag.key = key;
-      bag.words = [];
+    // Тема может не иметь слов нужной длины: в «Растениях» нет ни одного
+    // восьмибуквенного. Тогда нижняя планка длины опускается, пока слова не
+    // найдутся, — лучше слово покороче, чем этап без единого слова.
+    let words = [];
+    for (let lo = r.len[0]; lo >= 3; lo--) {
+      words = [];
       for (const list of BY_LEN[lang].values())
-        for (const w of list) if (eligible(w, r)) bag.words.push(w);
-      if (mods.theme && bag.words.length < THEME_MIN) {
-        bag.words = themePool(mods.theme)
-          .filter(w => !SKIP[lang].has(w) && allowedPart(w));
-      }
-      if (!bag.words.length) bag.words = [...CURATED[lang]];
+        for (const w of list) if (!used.has(w) && eligible(w, lo, r.len[1])) words.push(w);
+      if (words.length) break;
     }
-    for (let i = bag.words.length - 1; i > 0; i--) {   // тасуем
+    for (let i = words.length - 1; i > 0; i--) {          // тасуем
       const j = (Math.random() * (i + 1)) | 0;
-      [bag.words[i], bag.words[j]] = [bag.words[j], bag.words[i]];
+      [words[i], words[j]] = [words[j], words[i]];
     }
-    bag.at = 0;
+    pool.words = words;
+    pool.at = 0;
   }
 
+  // Блок так и не родился — слово возвращается в пул: игрок его не видел,
+  // а иначе каждая неудачная попытка спавна молча съедала бы слово.
+  const unuse = w => { used.delete(w); pool.at--; };
+
+  // null — слова кончились; этап на этом и закончится
   function nextWord(r) {
-    refillBag(r);
-    const window = Math.min(RECENT_WINDOW, Math.floor(bag.words.length / 2));
-    let word = null;
-    for (let tries = 0; tries < 30; tries++) {
-      if (bag.at >= bag.words.length) refillBag(r);
-      const candidate = bag.words[bag.at++];
-      if (!recent.includes(candidate) || tries === 29) { word = candidate; break; }
+    fillPool(r);
+    while (pool.at < pool.words.length) {
+      const w = pool.words[pool.at++];
+      if (used.has(w)) continue;
+      used.add(w);
+      return w;
     }
-    recent.push(word);
-    while (recent.length > window) recent.shift();
-    return word;
+    return null;
   }
 
   // ------------------------------------------------------------ блоки-слова
   function makeBlock() {
     const r = rules();
     const word = nextWord(r);
-    const maxGaps = word.length <= 4 ? 1 : 2;   // в коротком слове два пропуска
-                                                // оставили бы одну известную букву
-    const gapCount = Math.random() < r.gaps2 ? maxGaps : 1;
+    if (!word) { poolDry = true; return null; }
+    // Пропусков ровно столько, сколько задал этап, но две буквы в слове
+    // всегда остаются открытыми: иначе угадывать не по чему.
+    const gapCount = Math.min(r.gaps, word.length - 2);
 
     const gaps = [];
     while (gaps.length < gapCount) {
@@ -4029,7 +4020,7 @@
       // правилах, не должен посреди полёта потребовать точного прицела
       aim: needsAim(),
       // все слова, которые ещё могут получиться: из них считаются верные буквы
-      options: [word, ...neighboursOf(word, maxGaps)],
+      options: [word, ...neighboursOf(word, gapCount)],
       w, h: 40,
       x: 0,
       y: -40,
@@ -4046,7 +4037,7 @@
       const x = 10 + Math.random() * (W - 20 - w);
       if (!blocks.some(o => alive(o) && o.y < b.h + 20 && overlapX(x, w, o))) spots.push(x);
     }
-    if (!spots.length) return null;
+    if (!spots.length) { unuse(word); return null; }
     b.x = spots[0];
     return b;
   }
@@ -4055,11 +4046,14 @@
   const overlapX = (x, w, o) => x < o.x + o.w + GAP && o.x < x + w + GAP;
   const GAP = 8;                          // просвет между блоками, px
 
-  // false — блок не родился: либо нет места, либо поле уже загружено под завязку
+  // false — блок не родился: квота этапа выбрана, нет места или поле загружено
   function spawn() {
+    const r = rules();
+    if (stageSpawned >= r.quota) return false;
     const b = makeBlock();
     if (!b) return false;
-    if (fieldLoad() + blockCost(b) > rules().load) return false;
+    if (fieldLoad() + blockCost(b) > r.load) { unuse(b.word); return false; }
+    stageSpawned++;
     blocks.push(b);
     return true;
   }
@@ -4222,7 +4216,6 @@
     b.state = "solved";
     b.timer = 0;
     burst(b, 14);
-    if (solved % WORDS_PER_LEVEL === 0) levelUp();
     if (solved % 10 === 0 && bombs < 5) { bombs++; setMsg("+1 заряд"); }
     syncHud();
   }
@@ -4270,12 +4263,30 @@
     syncHud();
   }
 
-  function levelUp() {
-    level++;
+  // Этап отработал: квота выпущена (или слова кончились) и поле опустело.
+  // Пока поле не чистое, следующий этап не начинается — этапы не смешиваются.
+  const stageDone = () =>
+    (stageSpawned >= rules().quota || poolDry) && !blocks.some(alive);
+
+  function nextStage() {
+    if (stage >= STAGES.length - 1) { victory(); return; }
+    stage++;
+    stageSpawned = 0; poolDry = false;
+    dropBag();
     const r = rules();
-    setMsg("LEVEL " + level + "<br>слова " + r.len[0] + "–" + r.len[1] + " букв" +
-           (r.gaps2 > 0 ? "<br>бывает 2 пропуска" : ""));
+    setMsg(`ЭТАП ${stage + 1}/${STAGES.length}<br>${r.name}<br>` +
+           `${r.len[0]}–${r.len[1]} букв · ${r.gaps} ` +
+           (r.gaps === 1 ? "пропуск" : r.gaps < 5 ? "пропуска" : "пропусков"));
     flash = 1;
+    syncHud();
+  }
+
+  function victory() {
+    state = "win";
+    setMsg("ПОБЕДА!<br>Слов: " + solved + "<br>Очки: " + score +
+           "<br>Комбо: " + bestCombo + "<br>ENTER — в меню");
+    flash = 1;
+    syncHud();
   }
 
   function loseLife(b) {
@@ -4309,6 +4320,8 @@
     if (held.left)  cannonX -= CANNON_SPEED * dt;
     if (held.right) cannonX += CANNON_SPEED * dt;
     cannonX = Math.max(16, Math.min(W - 16, cannonX));
+
+    if (stageDone()) { nextStage(); if (state !== "play") { decay(dt); return; } }
 
     // Темп задаёт не таймер, а бюджет поля: интервал остался только антизалпом,
     // чтобы освободившееся место не заполнялось пачкой в один кадр.
@@ -4448,6 +4461,7 @@
     if (state === "ready") drawMenu();
     if (state === "pause") banner("PAUSE", "ESC — продолжить");
     if (state === "over")  banner("GAME OVER", "ENTER — в меню");
+    if (state === "win")   banner("ПОБЕДА", "все этапы пройдены");
 
     ctx.restore();
   }
@@ -4701,7 +4715,7 @@
   function setMsg(html) { el.msg.innerHTML = html; }
   function syncHud() {
     el.score.textContent = score;
-    el.level.textContent = level;
+    el.level.textContent = (stage + 1) + "/" + STAGES.length;
     el.combo.textContent = "x" + Math.min(1 + Math.floor(combo / 5), 5) +
                            (combo > 1 ? " (" + combo + ")" : "");
     el.lives.textContent = "♥".repeat(Math.max(0, lives)) || "—";
@@ -4709,13 +4723,11 @@
 
     // из чего сейчас складывается сложность
     const r = rules();
-    const band = r.rank <= 1500 ? "частые" : r.rank <= 4000 ? "+ реже"
-               : r.rank <= 10000 ? "+ редкие" : "любые";
-    el.rules.innerHTML = (mods.theme ? `тема: ${THEME_NAMES[mods.theme]}<br>` : "") +
-      `${r.len[0]}–${r.len[1]} букв · ${band}` +
-      (r.gaps2 > 0 ? `<br>до 2 пропусков` : "") +
+    el.rules.innerHTML = `${r.name}` +
+      (mods.theme ? `<br>тема: ${THEME_NAMES[mods.theme]}` : "") +
+      `<br>${r.len[0]}–${r.len[1]} букв · ${r.gaps} проп.` +
+      `<br>слов ${Math.min(stageSpawned, r.quota)}/${r.quota}` +
       (needsAim() ? `<br>прицел по букве` : "") +
-      `<br>бюджет поля ${r.load.toFixed(1)}` +
       `<br>скорость ${Math.round(r.speed)}`;
   }
 
@@ -4736,7 +4748,7 @@
       return;
     }
 
-    if (state === "over") {
+    if (state === "over" || state === "win") {
       if (e.key === "Enter" || e.key === " " || resolveLetter(e)) {
         e.preventDefault();
         toMenu();
@@ -4796,7 +4808,7 @@
       if (i !== -1) { menu.index = i; menuItems()[i].act(); }
       return;
     }
-    if (state === "over") { toMenu(); return; }
+    if (state === "over" || state === "win") { toMenu(); return; }
     if (e.button === 0) bombOne();
   });
   canvas.addEventListener("contextmenu", e => e.preventDefault());
