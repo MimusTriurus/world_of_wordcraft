@@ -88,7 +88,7 @@
     <canvas id="game"></canvas>
     <div class="hud">
       <div class="label">SCORE</div><div class="value" id="score">0</div>
-      <div class="label">ЭТАП</div><div class="value" id="level">1</div>
+      <div class="label">КРУГ · ЭТАП</div><div class="value" id="level">1 · 1/6</div>
       <div class="rules" id="rules"></div>
       <div class="label">COMBO</div><div class="value small" id="combo">x1</div>
       <div class="label">LIVES</div><div class="value small" id="lives">♥♥♥</div>
@@ -12474,6 +12474,7 @@
   let score, lives, bombs, combo, bestCombo, solved;
   let tips, ammo;                     // подсказки и патроны — разные запасы
   let stage, stageSpawned, poolDry;   // номер этапа, сколько он выпустил, кончились ли слова
+  let lap;                            // круг: пройдя все этапы, забег идёт заново
   let spawnTimer, state, shake, flash;
   const SPAWN_GAP = 600;         // мс между блоками — антизалп
   const SPAWN_RETRY = 200;       // мс до следующей попытки, если места нет
@@ -12652,6 +12653,7 @@
     tips = TIPS_START; ammo = AMMO_START;
     combo = 0; bestCombo = 0; solved = 0;
     stage = 0; stageSpawned = 0; poolDry = false;
+    lap = 1;
     used.clear(); dropBag();
     spawnTimer = 400;
     shake = 0; flash = 0;
@@ -12713,6 +12715,13 @@
     blocks.reduce((sum, b) => alive(b) && !b.broken ? sum + blockCost(b) : sum, 0);
 
   const rules = () => STAGES[Math.min(stage, STAGES.length - 1)];
+
+  // Победы у забега нет: пройдя все этапы, он начинается заново на LAP_SPEED
+  // быстрее. Скорость выбрана рычагом потому, что она единственная ни во что
+  // не упирается: длина слов кончается на восьми буквах, пропуски на трёх,
+  // бюджет поля — на пятнадцати единицах внимания.
+  const LAP_SPEED = 1;                                  // px/s за круг
+  const speedNow = r => r.speed + (lap - 1) * LAP_SPEED;
 
   // «8–8 букв» читается как опечатка, поэтому одинаковые границы схлопываем
   const lenLabel = r => r.len[0] === r.len[1] ? String(r.len[0])
@@ -12871,7 +12880,7 @@
       w, h: 40,
       x: 0,
       y: -40,
-      speed: r.speed,
+      speed: speedNow(r),
       state: "live",
       timer: 0,
     };
@@ -13177,7 +13186,7 @@
     (stageSpawned >= rules().quota || poolDry) && !blocks.some(alive);
 
   function nextStage() {
-    if (stage >= STAGES.length - 1) { victory(); return; }
+    if (stage >= STAGES.length - 1) { nextLap(); return; }
     stage++;
     stageSpawned = 0; poolDry = false;
     dropBag();
@@ -13189,10 +13198,15 @@
     syncHud();
   }
 
-  function victory() {
-    state = "win";
-    setMsg("ПОБЕДА!<br>Слов: " + solved + "<br>Очки: " + score +
-           "<br>Комбо: " + bestCombo + "<br>ENTER — в меню");
+  // Все этапы пройдены — забег заходит на новый круг, весь целиком и быстрее.
+  function nextLap() {
+    lap++;
+    stage = 0; stageSpawned = 0; poolDry = false;
+    // Пул открывается заново: «слова не повторяются» — обещание про круг, а не
+    // про вечность. Без сброса узкая тема пустеет уже к третьему кругу, и
+    // дальше этапы проходились бы на пустом поле, набирая скорость даром.
+    used.clear(); dropBag();
+    setMsg(`КРУГ ${lap}<br>Скорость +${(lap - 1) * LAP_SPEED}<br>` + STAGES[0].name);
     flash = 1;
     syncHud();
   }
@@ -13204,7 +13218,8 @@
     lives--; combo = 0; shake = 16;
     if (lives <= 0) {
       state = "over";
-      setMsg("GAME OVER<br>Слов: " + solved + "<br>Комбо: " + bestCombo +
+      setMsg("GAME OVER<br>Круг " + lap + ", этап " + (stage + 1) +
+             "<br>Слов: " + solved + "<br>Комбо: " + bestCombo +
              "<br>ENTER — заново");
     } else {
       setMsg("Пропущено:<br>" + b.word.toUpperCase());
@@ -13230,7 +13245,7 @@
     if (held.right) cannonX += CANNON_SPEED * dt;
     cannonX = Math.max(16, Math.min(W - 16, cannonX));
 
-    if (stageDone()) { nextStage(); if (state !== "play") { decay(dt); return; } }
+    if (stageDone()) nextStage();
 
     // Темп задаёт не таймер, а бюджет поля: интервал остался только антизалпом,
     // чтобы освободившееся место не заполнялось пачкой в один кадр.
@@ -13375,8 +13390,7 @@
 
     if (state === "ready") drawMenu();
     if (state === "pause") banner("PAUSE", "ESC — продолжить");
-    if (state === "over")  banner("GAME OVER", "ENTER — в меню");
-    if (state === "win")   banner("ПОБЕДА", "все этапы пройдены");
+    if (state === "over")  banner("GAME OVER", "круг " + lap + " · ENTER — в меню");
 
     ctx.restore();
   }
@@ -13655,7 +13669,7 @@
   function setMsg(html) { el.msg.innerHTML = html; }
   function syncHud() {
     el.score.textContent = score;
-    el.level.textContent = (stage + 1) + "/" + STAGES.length;
+    el.level.textContent = lap + " · " + (stage + 1) + "/" + STAGES.length;
     el.combo.textContent = "x" + Math.min(1 + Math.floor(combo / 5), 5) +
                            (combo > 1 ? " (" + combo + ")" : "");
     el.lives.textContent = "♥".repeat(Math.max(0, lives)) || "—";
@@ -13670,7 +13684,7 @@
       `<br>${lenLabel(r)} букв · ${r.gaps} проп.` +
       `<br>слов ${Math.min(stageSpawned, r.quota)}/${r.quota}` +
       (needsAim() ? `<br>прицел по букве` : "") +
-      `<br>скорость ${Math.round(r.speed)}`;
+      `<br>скорость ${Math.round(speedNow(r))}`;
   }
 
   // ---------------------------------------------------------------- ввод
@@ -13690,7 +13704,7 @@
       return;
     }
 
-    if (state === "over" || state === "win") {
+    if (state === "over") {
       if (e.key === "Enter" || e.key === " " || resolveLetter(e)) {
         e.preventDefault();
         toMenu();
@@ -13750,7 +13764,7 @@
       if (i !== -1) { menu.index = i; menuItems()[i].act(); }
       return;
     }
-    if (state === "over" || state === "win") { toMenu(); return; }
+    if (state === "over") { toMenu(); return; }
     if (e.button === 0) bombOne();
     if (e.button === 2) hint();
   });
