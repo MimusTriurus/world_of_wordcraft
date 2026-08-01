@@ -391,7 +391,9 @@
   let lang = localStorage.getItem("ws-lang") || "ru";
   let blocks, shots, sparks;
   let score, level, lives, bombs, combo, bestCombo, solved;
-  let spawnTimer, spawnInterval, state, shake, flash;
+  let spawnTimer, state, shake, flash;
+  const SPAWN_GAP = 600;         // мс между блоками — антизалп
+  const SPAWN_RETRY = 200;       // мс до следующей попытки, если места нет
   let cannonX, cooldown;
   let lastKey = null, lastKeyOk = false, lastKeyAt = 0;
   const held = { left: false, right: false };
@@ -405,7 +407,7 @@
     blocks = []; shots = []; sparks = [];
     score = 0; level = 1; lives = 3; bombs = 3;
     combo = 0; bestCombo = 0; solved = 0;
-    spawnInterval = 2400; spawnTimer = 600;
+    spawnTimer = 400;
     shake = 0; flash = 0;
     cannonX = W / 2; cooldown = 0;
     held.left = held.right = false;
@@ -424,23 +426,42 @@
   const LEVELS = [
     // len — длина слова, rank — предел частотности (чем больше, тем реже
     // слово встречается в речи), gaps2 — доля блоков с двумя пропусками,
-    // aim — целиться нужно в саму букву, а не просто в блок
-    { len: [3, 4], rank:  1500, gaps2: 0,    aim: false, speed: 20 },
-    { len: [3, 5], rank:  1500, gaps2: 0,    aim: false, speed: 21 },
-    { len: [3, 5], rank:  4000, gaps2: 0,    aim: false, speed: 22 },
-    { len: [4, 6], rank:  4000, gaps2: 0,    aim: false, speed: 23 },
-    { len: [4, 6], rank: 10000, gaps2: 0.2,  aim: false, speed: 24 },
-    { len: [4, 7], rank: 10000, gaps2: 0.35, aim: false, speed: 26 },
-    { len: [5, 7], rank: 99999, gaps2: 0.5,  aim: true,  speed: 27 },
-    { len: [5, 8], rank: 99999, gaps2: 0.65, aim: true,  speed: 29 },
+    // aim — целиться нужно в саму букву, а не просто в блок,
+    // load — сколько «внимания» помещается на поле разом, см. blockCost
+    { len: [3, 4], rank:  1500, gaps2: 0,    aim: false, speed: 20, load:  5.0 },
+    { len: [3, 5], rank:  1500, gaps2: 0,    aim: false, speed: 21, load:  5.6 },
+    { len: [3, 5], rank:  4000, gaps2: 0,    aim: false, speed: 22, load:  6.2 },
+    { len: [4, 6], rank:  4000, gaps2: 0,    aim: false, speed: 23, load:  6.9 },
+    { len: [4, 6], rank: 10000, gaps2: 0.2,  aim: false, speed: 24, load:  7.6 },
+    { len: [4, 7], rank: 10000, gaps2: 0.35, aim: false, speed: 26, load:  8.3 },
+    { len: [5, 7], rank: 99999, gaps2: 0.5,  aim: true,  speed: 27, load:  9.1 },
+    { len: [5, 8], rank: 99999, gaps2: 0.65, aim: true,  speed: 29, load: 10.0 },
   ];
+
+  // Цена блока в «единицах внимания». Длинное, редкое и дырявое слово
+  // занимает место нескольких простых — так концентрация слов на поле сама
+  // подстраивается под их сложность.
+  const rarityCost = rank => rank <= 1500 ? 0 : rank <= 4000 ? 0.2
+                           : rank <= 10000 ? 0.4 : 0.6;
+
+  function blockCost(b) {
+    // считаем по незакрытым пропускам: закрыл один из двух — блок подешевел
+    // и место под новое слово освободилось раньше
+    const open = Math.max(1, b.shown.filter(ch => !ch).length);
+    return 1 + 0.2 * (b.word.length - 3) + 0.8 * (open - 1) + rarityCost(b.rank);
+  }
+
+  const fieldLoad = () => blocks.reduce((sum, b) => alive(b) ? sum + blockCost(b) : sum, 0);
   const WORDS_PER_LEVEL = 8;
 
   function rules() {
     const last = LEVELS[LEVELS.length - 1];
     if (level <= LEVELS.length) return LEVELS[level - 1];
-    // дальше упирается только скорость, по 1.5 px/s за уровень
-    return { ...last, gaps2: 0.75, speed: last.speed + (level - LEVELS.length) * 1.5 };
+    // дальше растут только скорость и бюджет поля
+    const over = level - LEVELS.length;
+    return { ...last, gaps2: 0.75,
+             speed: last.speed + over * 1.5,
+             load: Math.min(14, last.load + over * 0.4) };
   }
 
   // ------------------------------------------------------------ блоки-слова
@@ -499,10 +520,11 @@
   const overlapX = (x, w, o) => x < o.x + o.w + GAP && o.x < x + w + GAP;
   const GAP = 8;                          // просвет между блоками, px
 
-  // false — места не нашлось, попробуем чуть позже
+  // false — блок не родился: либо нет места, либо поле уже загружено под завязку
   function spawn() {
     const b = makeBlock();
     if (!b) return false;
+    if (fieldLoad() + blockCost(b) > rules().load) return false;
     blocks.push(b);
     return true;
   }
@@ -677,7 +699,6 @@
 
   function levelUp() {
     level++;
-    spawnInterval = Math.max(750, 2400 - (level - 1) * 165);
     const r = rules();
     setMsg("LEVEL " + level + "<br>слова " + r.len[0] + "–" + r.len[1] + " букв" +
            (r.gaps2 > 0 ? "<br>бывает 2 пропуска" : ""));
@@ -716,8 +737,10 @@
     if (held.right) cannonX += CANNON_SPEED * dt;
     cannonX = Math.max(16, Math.min(W - 16, cannonX));
 
+    // Темп задаёт не таймер, а бюджет поля: интервал остался только антизалпом,
+    // чтобы освободившееся место не заполнялось пачкой в один кадр.
     spawnTimer -= dt * 1000;
-    if (spawnTimer <= 0) spawnTimer = spawn() ? spawnInterval : 250;
+    if (spawnTimer <= 0) spawnTimer = spawn() ? SPAWN_GAP : SPAWN_RETRY;
 
     for (const b of blocks) {
       if (b.state === "solved" || b.state === "dead") { b.timer += dt; continue; }
@@ -983,6 +1006,7 @@
     el.rules.innerHTML = `${r.len[0]}–${r.len[1]} букв · ${band}` +
       (r.gaps2 > 0 ? `<br>до 2 пропусков` : "") +
       (r.aim ? `<br>прицел по букве` : "") +
+      `<br>бюджет поля ${r.load.toFixed(1)}` +
       `<br>скорость ${Math.round(r.speed)}`;
   }
 
