@@ -3514,7 +3514,7 @@
 
   // ------------------------------------------------------------------ стейт
   let lang = localStorage.getItem("ws-lang") || "ru";
-  let blocks, shots, sparks;
+  let blocks, shots, sparks, reveals;
   let score, level, lives, bombs, combo, bestCombo, solved;
   let spawnTimer, state, shake, flash;
   const SPAWN_GAP = 600;         // мс между блоками — антизалп
@@ -3605,7 +3605,7 @@
   }
 
   function reset(startNow) {
-    blocks = []; shots = []; sparks = [];
+    blocks = []; shots = []; sparks = []; reveals = [];
     score = 0; level = 1; lives = 3; bombs = 3;
     combo = 0; bestCombo = 0; solved = 0;
     spawnTimer = 400;
@@ -3903,7 +3903,23 @@
   function bombOne() {
     const victim = blockInLine();
     if (!victim) { setMsg("На линии огня<br>пусто."); return; }
-    detonate([victim], 0, "Сбито: слово<br>не засчитано.");
+    if (detonate([victim], 0, "Сбито: слово<br>не засчитано.")) reveal(victim);
+  }
+
+  // Показываем загаданное слово на месте сбитого блока: игрок сбил его именно
+  // потому, что не разгадал, и должен увидеть, что там было.
+  // Появляется сразу непрозрачной и держится, пока слово читается,
+  // потом плавно гаснет. Общее время короткое: карточка не должна мешать.
+  const REVEAL_TIME = 1.3;
+  const REVEAL_HOLD = 0.4;       // сколько держится на полной яркости
+  function reveal(b) {
+    reveals.push({
+      word: b.word,
+      gaps: b.gaps.filter(i => !b.shown[i]),   // что осталось неразгаданным
+      x: b.x + b.w / 2,
+      y: b.y + b.h / 2,
+      t: REVEAL_TIME,
+    });
   }
 
   // пробел — зачистка всего поля вместе с летящими буквами
@@ -4067,6 +4083,10 @@
       p.life -= dt * 2.2;
       if (p.life <= 0) sparks.splice(i, 1);
     }
+    for (let i = reveals.length - 1; i >= 0; i--) {
+      reveals[i].t -= dt;
+      if (reveals[i].t <= 0) reveals.splice(i, 1);
+    }
     shake = Math.max(0, shake - dt * 40);
     flash = Math.max(0, flash - dt * 2.5);
   }
@@ -4125,6 +4145,8 @@
       ctx.fillRect(p.x - 2, p.y - 2, 4, 4);
     }
     ctx.globalAlpha = 1;
+
+    for (const r of reveals) drawReveal(r);
 
     drawCannon();
 
@@ -4191,6 +4213,40 @@
         ctx.fillStyle = solvedNow ? "#9ead86" : INK;
         ctx.fillText(ch.toUpperCase(), cx, cy);
       }
+    }
+    ctx.restore();
+  }
+
+  // Карточка с загаданным словом на месте сбитого блока: всплывает вверх и
+  // гаснет. Неразгаданные буквы показаны вывернутыми — видно, чего не хватило.
+  function drawReveal(r) {
+    const age = 1 - r.t / REVEAL_TIME;
+    const cellW = 21, padX = 13, h = 44;
+    const w = padX * 2 + r.word.length * cellW;
+    const x = Math.max(6, Math.min(W - 6 - w, r.x - w / 2));
+    const y = Math.max(6, r.y - h / 2 - age * 34);
+
+    ctx.save();
+    const fade = REVEAL_TIME - REVEAL_HOLD;
+    ctx.globalAlpha = r.t > fade ? 1 : r.t / fade;
+    ctx.fillStyle = "#9ead86";
+    roundRect(x, y, w, h, 6); ctx.fill();
+    ctx.strokeStyle = INK; ctx.lineWidth = 2.5;
+    roundRect(x, y, w, h, 6); ctx.stroke();
+
+    ctx.font = "bold 22px 'Courier New', monospace";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    for (let i = 0; i < r.word.length; i++) {
+      const cx = x + padX + cellW * (i + 0.5), cy = y + h / 2 + 1;
+      if (r.gaps.includes(i)) {
+        ctx.fillStyle = INK;
+        ctx.fillRect(cx - cellW / 2 + 1, y + 5, cellW - 2, h - 10);
+        ctx.fillStyle = "#9ead86";
+      } else {
+        ctx.fillStyle = INK;
+      }
+      ctx.fillText(r.word[i].toUpperCase(), cx, cy);
     }
     ctx.restore();
   }
