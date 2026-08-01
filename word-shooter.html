@@ -12526,6 +12526,28 @@
   const THEME_OPTIONS = ["", ...Object.keys(THEME_NAMES)];
   const themeLabel = id => id ? THEME_NAMES[id] : "все";
 
+  // ---------------------------------------------------------------- рекорды
+  // Забеги с послаблениями в таблицу попадают тоже, но помечены звёздочкой:
+  // выкидывать их нечестно (игрок их сыграл), а мешать с чистыми — бессмысленно.
+  const BEST_MAX = 10;
+  let records = [];
+  try {
+    const raw = JSON.parse(localStorage.getItem("ws-best") || "[]");
+    if (Array.isArray(raw)) records = raw.filter(r => r && typeof r.score === "number");
+  } catch { /* испорченная запись — начинаем таблицу заново */ }
+
+  // Возвращает место в таблице (0-based) или -1, если забег в неё не попал.
+  function recordRun() {
+    const row = { score, lap, stage: stage + 1, solved, lang,
+                  easy: mods.freeTips || mods.freeAmmo || mods.lap > 1 };
+    records.push(row);
+    records.sort((a, b) => b.score - a.score);
+    records.length = Math.min(records.length, BEST_MAX);
+    try { localStorage.setItem("ws-best", JSON.stringify(records)); }
+    catch { /* хранилище недоступно — таблица проживёт до перезагрузки */ }
+    return records.indexOf(row);
+  }
+
   // -------------------------------------------------------------------- меню
   // open — открытый выпадающий список, opt — подсвеченный в нём пункт
   const menu = { screen: "root", index: 0, open: null, opt: 0 };
@@ -12534,6 +12556,12 @@
     root: [
       { label: "Начать игру", act: () => reset(true) },
       { label: "Модификаторы", act: () => { menu.screen = "mods"; menu.index = 0; } },
+      { label: "Рекорды", act: () => { menu.screen = "best"; menu.index = 0; } },
+    ],
+    best: [
+      { label: "Назад",
+        hint: "Сортировка по очкам.<br>* — забег с послаблениями",
+        act: () => backToRoot("Рекорды") },
     ],
     mods: [
       // Круг задаёт скорость всех этапов разом, поэтому стоит первым: это
@@ -12577,21 +12605,35 @@
         value: () => lang.toUpperCase(),
         hint: "Словарь и раскладка",
         act: () => { setLang(lang === "ru" ? "en" : "ru"); } },
-      { label: "Назад", act: () => { menu.screen = "root"; menu.index = 0; } },
+      { label: "Назад", act: () => backToRoot("Модификаторы") },
     ],
   };
 
   const menuItems = () => SCREENS[menu.screen];
 
+  // Курсор возвращаем на тот пункт, из которого ушли, и ищем его по имени:
+  // корневой список растёт, и номер пункта в нём не константа.
+  function backToRoot(label) {
+    menu.screen = "root";
+    menu.index = Math.max(0, SCREENS.root.findIndex(it => it.label === label));
+    menu.open = null;
+  }
+
   // Прямоугольник пункта — общий для отрисовки и попадания мышью.
   const MENU_STEP = 44, MENU_W = 300;
   const MENU_HEAD = 92, MENU_FOOT = 46;   // место под заголовок и подсказку
-  // Экран модификаторов вырос до восьми пунктов, поэтому раскладка считается
-  // от их числа, а не от середины холста: иначе список уезжает за нижний край.
-  function menuTop() {
-    const body = MENU_HEAD + menuItems().length * MENU_STEP + MENU_FOOT;
-    return Math.max(MENU_HEAD + 6, (H - body) / 2 + MENU_HEAD);
+  const BEST_STEP = 26, BEST_HEAD = 30, BEST_W = 380;
+
+  // Экран модификаторов вырос до девяти пунктов, а рекорды вставляют таблицу
+  // между заголовком и пунктами, поэтому раскладка считается от содержимого,
+  // а не от середины холста: иначе список уезжает за нижний край.
+  const bodyExtra = () => menu.screen === "best"
+    ? BEST_HEAD + Math.max(1, records.length) * BEST_STEP : 0;
+  function panelTop() {
+    const body = MENU_HEAD + bodyExtra() + menuItems().length * MENU_STEP + MENU_FOOT;
+    return Math.max(6, (H - body) / 2);
   }
+  const menuTop = () => panelTop() + MENU_HEAD + bodyExtra();
   function itemRect(i) {
     return { x: (W - MENU_W) / 2, y: menuTop() + i * MENU_STEP, w: MENU_W, h: 36 };
   }
@@ -12662,7 +12704,8 @@
       case "Enter":
       case " ":         items[menu.index].act(); break;
       case "Escape":
-        if (menu.screen === "mods") { menu.screen = "root"; menu.index = 1; }
+        if (menu.screen === "mods") backToRoot("Модификаторы");
+        else if (menu.screen === "best") backToRoot("Рекорды");
         break;
       default: return false;
     }
@@ -13242,8 +13285,10 @@
     lives--; combo = 0; shake = 16;
     if (lives <= 0) {
       state = "over";
+      const place = recordRun();
       setMsg("GAME OVER<br>Круг " + lap + ", этап " + (stage + 1) +
-             "<br>Слов: " + solved + "<br>Комбо: " + bestCombo +
+             "<br>Очки: " + score + "<br>Слов: " + solved +
+             (place >= 0 ? "<br>РЕКОРД №" + (place + 1) : "") +
              "<br>ENTER — заново");
     } else {
       setMsg("Пропущено:<br>" + b.word.toUpperCase());
@@ -13584,9 +13629,11 @@
     }
   }
 
+  const MENU_TITLES = { root: "WORD SHOOTER", mods: "МОДИФИКАТОРЫ", best: "РЕКОРДЫ" };
+
   function drawMenu() {
     const items = menuItems();
-    const top = menuTop() - MENU_HEAD;
+    const top = panelTop();
     const bottom = menuTop() + items.length * MENU_STEP + MENU_FOOT;
 
     ctx.fillStyle = "rgba(158,173,134,.92)";
@@ -13597,7 +13644,9 @@
     ctx.textAlign = "center";
     ctx.fillStyle = INK;
     ctx.font = "bold 30px 'Courier New', monospace";
-    ctx.fillText(menu.screen === "root" ? "WORD SHOOTER" : "МОДИФИКАТОРЫ", W / 2, top + 44);
+    ctx.fillText(MENU_TITLES[menu.screen], W / 2, top + 44);
+
+    if (menu.screen === "best") drawRecords(top + MENU_HEAD);
 
     for (let i = 0; i < items.length; i++) {
       const it = items[i], r = itemRect(i), on = i === menu.index;
@@ -13631,6 +13680,46 @@
       ctx.fillText(line, W / 2, menuTop() + items.length * MENU_STEP + 14 + i * 15));
 
     if (menu.open) drawDrop();
+  }
+
+  // Таблица результатов. Колонки выровнены по краям, а не по центру: очки
+  // и число слов читаются столбиком только при выключке вправо.
+  function drawRecords(y) {
+    const x = (W - BEST_W) / 2;
+    const col = { rank: x + 6, score: x + 140, lap: x + 250, solved: x + 320,
+                  lang: x + BEST_W - 6 };
+
+    ctx.font = "12px 'Courier New', monospace";
+    ctx.fillStyle = INK;
+    ctx.textAlign = "left";   ctx.fillText("#", col.rank, y + 14);
+    ctx.textAlign = "right";  ctx.fillText("ОЧКИ", col.score, y + 14);
+    ctx.textAlign = "center"; ctx.fillText("КРУГ/ЭТАП", col.lap, y + 14);
+    ctx.textAlign = "right";  ctx.fillText("СЛОВ", col.solved, y + 14);
+    ctx.textAlign = "right";  ctx.fillText("ЯЗ", col.lang, y + 14);
+
+    ctx.strokeStyle = "rgba(43,49,34,.35)"; ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(x, y + 21); ctx.lineTo(x + BEST_W, y + 21);
+    ctx.stroke();
+
+    if (!records.length) {
+      ctx.textAlign = "center";
+      ctx.font = "13px 'Courier New', monospace";
+      ctx.fillText("Пока пусто — сыграй забег", W / 2, y + BEST_HEAD + 16);
+      return;
+    }
+
+    records.forEach((r, i) => {
+      const ry = y + BEST_HEAD + i * BEST_STEP + 16;
+      ctx.font = "bold 14px 'Courier New', monospace";
+      ctx.textAlign = "left";   ctx.fillText(String(i + 1), col.rank, ry);
+      ctx.textAlign = "right";  ctx.fillText(r.score + (r.easy ? "*" : ""), col.score, ry);
+      ctx.font = "14px 'Courier New', monospace";
+      ctx.textAlign = "center"; ctx.fillText(r.lap + "/" + r.stage, col.lap, ry);
+      ctx.textAlign = "right";  ctx.fillText(String(r.solved), col.solved, ry);
+      ctx.font = "12px 'Courier New', monospace";
+      ctx.textAlign = "right";  ctx.fillText((r.lang || "ru").toUpperCase(), col.lang, ry);
+    });
   }
 
   // Выпадающий список поверх меню: своя подложка, чтобы пункты под ним
