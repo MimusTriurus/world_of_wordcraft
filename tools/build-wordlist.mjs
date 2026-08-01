@@ -1,10 +1,17 @@
-// Генератор словаря для word-shooter.html.
+// Генератор словарных данных для word-shooter.html.
 //
-// Качает частотные списки слов и вшивает отфильтрованную выборку прямо в игру,
-// между маркерами BULK-WORDLIST. Словарь нужен только для проверки ответа:
-// блок принимает любую букву, дающую настоящее слово, поэтому Л_С — это и ЛЕС,
-// и ЛИС. Слова из этого списка в блоках не появляются, их поставляет
-// курируемый WORDS внутри игры.
+// Игра берёт слова для блоков из курируемого списка WORDS внутри самой игры.
+// Этот скрипт качает частотные корпуса и вшивает в игру, между маркерами
+// WORDLIST, по две вещи на каждое такое слово:
+//
+//   ранг     — место в частотном списке. Ось сложности: чем реже слово
+//              встречается в речи, тем позже оно появляется в игре.
+//   соседи   — настоящие слова той же длины, отличающиеся не более чем двумя
+//              буквами. Из них считается, какие буквы засчитывать в пропуски:
+//              Л_С — это и ЛЕС, и ЛИС, а И__А — и ИГРА, и ИГЛА, и ИКРА.
+//
+// Соседей достаточно двух замен, потому что больше двух пропусков в блоке
+// не бывает. Возить в игре весь корпус ради этого не нужно.
 //
 //   node tools/build-wordlist.mjs            скачать и пересобрать
 //   node tools/build-wordlist.mjs --cache    взять уже скачанное из tools/.cache
@@ -18,31 +25,37 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const GAME = path.join(ROOT, "word-shooter.html");
 const CACHE = path.join(ROOT, "tools", ".cache");
 
+// Сколько букв игра может выбить из слова. В коротком слове два пропуска
+// оставляют одну известную букву — это уже не загадка, а лотерея, поэтому
+// глубина растёт вместе с длиной. Отсюда же и глубина поиска соседей.
+const maxGaps = len => (len <= 4 ? 1 : 2);
+
+// Сколько соседей держать на слово: список отсортирован по частотности,
+// хвост из редкой экзотики только раздувает файл.
+const NEIGHBOUR_CAP = 120;
+
 const SOURCES = {
-  en: {
-    url: "https://raw.githubusercontent.com/first20hours/google-10000-english/master/google-10000-english-no-swears.txt",
-    file: "en_raw.txt",
-    limit: 8000,
-    // список — одно слово в строке, уже по убыванию частоты
-    parse: line => line.trim(),
-    valid: /^[a-z]{3,8}$/,
-  },
   ru: {
     url: "https://raw.githubusercontent.com/hermitdave/FrequencyWords/master/content/2018/ru/ru_50k.txt",
     file: "ru_raw.txt",
-    // Берём список целиком: корпус частотный по субтитрам, и бытовые
-    // существительные в нём стоят низко — «игла» на 25563 месте, «икра» на
-    // 33100. Срез по частоте резал ровно те слова, ради которых всё затевалось.
-    limit: Infinity,
+    alphabet: "абвгдежзийклмнопрстуфхцчшщъыьэюя",
     // формат «слово частота»
     parse: line => line.trim().split(/\s+/)[0] ?? "",
-    // ё приводим к е: в игре в алфавите ввода только е
+    // ё приводим к е: в алфавите ввода игры только е
     normalize: w => w.replace(/ё/g, "е"),
     valid: /^[а-я]{3,8}$/,
     // Корпус собран по субтитрам и полон мата. Слово из словаря может стать
     // ответом, а игра показывает достроенное слово на экране — поэтому чистим.
     // Английский список берётся в варианте no-swears, там это уже сделано.
     deny: /^(ху[йеяю]|пизд|[е]б[ауеиоНн]|бля|сук[аиуе]$|муд[ао]|г[ао]ндон|залуп|дроч|говн|срак|жоп|дерьм|шлюх|мраз|пид[оа]р|хер[аоуни]|манда$|елда|минет|отсос|трах[ан]|сперм|очко$)/,
+  },
+  en: {
+    url: "https://raw.githubusercontent.com/first20hours/google-10000-english/master/google-10000-english-no-swears.txt",
+    file: "en_raw.txt",
+    alphabet: "abcdefghijklmnopqrstuvwxyz",
+    // одно слово в строке, уже по убыванию частоты
+    parse: line => line.trim(),
+    valid: /^[a-z]{3,8}$/,
   },
 };
 
@@ -51,10 +64,8 @@ const useCache = process.argv.includes("--cache");
 async function fetchList(key) {
   const src = SOURCES[key];
   const cached = path.join(CACHE, src.file);
-  if (useCache || existsSync(cached)) {
-    if (existsSync(cached)) return readFile(cached, "utf8");
-    throw new Error(`нет кэша ${cached}, запусти без --cache`);
-  }
+  if (existsSync(cached)) return readFile(cached, "utf8");
+  if (useCache) throw new Error(`нет кэша ${cached}, запусти без --cache`);
   process.stdout.write(`качаю ${key}: ${src.url}\n`);
   const res = await fetch(src.url);
   if (!res.ok) throw new Error(`${src.url} -> HTTP ${res.status}`);
@@ -64,34 +75,27 @@ async function fetchList(key) {
   return text;
 }
 
-function distill(text, src, needed) {
-  const seen = new Set();
+// слово -> место в частотном списке, плюс сам список чистых слов
+function corpus(text, src) {
+  const rank = new Map();
   for (const line of text.split(/\r?\n/)) {
     let w = src.parse(line).toLowerCase();
     if (src.normalize) w = src.normalize(w);
     if (!src.valid.test(w)) continue;
     if (src.deny?.test(w)) continue;
-    if (!needed.has(w)) continue;
-    seen.add(w);
-    if (seen.size >= src.limit) break;
+    if (!rank.has(w)) rank.set(w, rank.size + 1);
   }
-  return [...seen].sort();
+  return rank;
 }
 
-// Игра спрашивает словарь ровно об одном: «слово из блока, где одна буква
-// заменена на другую». Значит, полезны только соседи спавнящихся слов на
-// расстоянии в одну замену — всё прочее в файл можно не тащить.
-function neighbours(words, alphabet) {
-  const out = new Set();
-  for (const w of words)
-    for (let i = 0; i < w.length; i++)
-      for (const ch of alphabet)
-        if (ch !== w[i]) out.add(w.slice(0, i) + ch + w.slice(i + 1));
-  return out;
+function distance(a, b, limit) {
+  let d = 0;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i] && ++d > limit) return d;
+  return d;
 }
 
 // Курируемый список слов лежит в самой игре — читаем его оттуда,
-// чтобы список соседей не разъехался с тем, что реально спавнится.
+// чтобы данные не разъехались с тем, что реально спавнится.
 function spawnWords(html, key) {
   const block = html.match(new RegExp(`\\n    ${key}: \\(([\\s\\S]*?)\\)\\.split`));
   if (!block) throw new Error(`не нашёл WORDS.${key} в word-shooter.html`);
@@ -99,58 +103,62 @@ function spawnWords(html, key) {
     .map(s => s.slice(1, -1)).join("").split(" ").filter(Boolean);
 }
 
-const START = "  // >>> BULK-WORDLIST START <<<";
-const END = "  // >>> BULK-WORDLIST END <<<";
+const START = "  // >>> WORDLIST START <<<";
+const END = "  // >>> WORDLIST END <<<";
 
-// Слова кладём в одну строку через пробел и режем split(" ") при загрузке:
-// это заметно компактнее, чем JSON-массив с кавычками и запятыми у каждого.
-function renderBlock(lists) {
-  const chunk = words => {
-    const lines = [];
-    let line = "";
-    for (const w of words) {
-      if (line.length + w.length + 1 > 96) { lines.push(line); line = ""; }
-      line += (line ? " " : "") + w;
-    }
-    if (line) lines.push(line);
-    return lines.map((l, i) => `    "${l}${i === lines.length - 1 ? "" : " "}"`).join(" +\n");
-  };
-  return [
-    START,
-    "  const BULK = {",
-    `    // ${lists.ru.length} слов, ${SOURCES.ru.url}`,
-    "    ru:",
-    chunk(lists.ru) + ",",
-    `    // ${lists.en.length} слов, ${SOURCES.en.url}`,
-    "    en:",
-    chunk(lists.en) + ",",
-    "  };",
-    END,
-  ].join("\n");
+function renderBlock(data) {
+  const lines = [START, "  const META = {"];
+  for (const key of ["ru", "en"]) {
+    const { entries, url } = data[key];
+    lines.push(`    // ${entries.length} слов, ранг и соседи из ${url}`);
+    lines.push(`    ${key}:`);
+    lines.push(entries.map((e, i) =>
+      `      "${e}${i === entries.length - 1 ? "" : ";"}"`).join(" +\n") + ",");
+  }
+  lines.push("  };", END);
+  return lines.join("\n");
 }
 
-const ALPHABET = {
-  ru: "абвгдежзийклмнопрстуфхцчшщъыьэюя",
-  en: "abcdefghijklmnopqrstuvwxyz",
-};
-
 const html = await readFile(GAME, "utf8");
+const data = {};
 
-const lists = {};
 for (const key of ["ru", "en"]) {
   const src = SOURCES[key];
+  const rank = corpus(await fetchList(key), src);
   const spawn = spawnWords(html, key);
-  const needed = neighbours(spawn, ALPHABET[key]);
-  lists[key] = distill(await fetchList(key), src, needed);
+
+  // группируем корпус по длине — сравнивать имеет смысл только равные длины
+  const byLen = new Map();
+  for (const w of rank.keys()) {
+    if (!byLen.has(w.length)) byLen.set(w.length, []);
+    byLen.get(w.length).push(w);
+  }
+
+  let missing = 0, totalNb = 0;
+  const entries = spawn.map(word => {
+    const r = rank.get(word);
+    if (r === undefined) missing++;
+    const limit = maxGaps(word.length);
+    const nb = (byLen.get(word.length) || [])
+      .filter(w => w !== word && distance(word, w, limit) <= limit)
+      .sort((a, b) => rank.get(a) - rank.get(b))
+      .slice(0, NEIGHBOUR_CAP);
+    totalNb += nb.length;
+    // ранга нет — считаем слово редким, пусть достаётся поздним уровням
+    return [word, r ?? 99999, ...nb].join(" ");
+  });
+
+  data[key] = { entries, url: src.url };
   process.stdout.write(
-    `${key}: ${spawn.length} слов в блоках, ${needed.size} возможных замен, ` +
-    `${lists[key].length} из них настоящие слова\n`);
+    `${key}: ${spawn.length} слов в блоках, ${rank.size} слов в корпусе, ` +
+    `соседей всего ${totalNb} (в среднем ${(totalNb / spawn.length).toFixed(1)} на слово)` +
+    (missing ? `, без ранга: ${missing}` : "") + "\n");
 }
 
 const from = html.indexOf(START);
 const to = html.indexOf(END);
-if (from === -1 || to === -1) throw new Error("маркеры BULK-WORDLIST не найдены в word-shooter.html");
+if (from === -1 || to === -1) throw new Error("маркеры WORDLIST не найдены в word-shooter.html");
 
-const patched = html.slice(0, from) + renderBlock(lists) + html.slice(to + END.length);
+const patched = html.slice(0, from) + renderBlock(data) + html.slice(to + END.length);
 await writeFile(GAME, patched, "utf8");
-process.stdout.write(`word-shooter.html: ${html.length} -> ${patched.length} байт\n`);
+process.stdout.write(`word-shooter.html: ${html.length} -> ${patched.length} символов\n`);

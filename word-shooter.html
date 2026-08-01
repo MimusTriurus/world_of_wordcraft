@@ -50,6 +50,7 @@
   .hud .label { opacity: .6; }
   .hud .value { font-size: 20px; font-weight: bold; margin-bottom: 7px; }
   .hud .value.small { font-size: 15px; }
+  .hud .rules { font-size: 10px; line-height: 1.4; opacity: .75; margin: -6px 0 8px; }
   .msg { margin-top: auto; font-size: 11px; line-height: 1.5; min-height: 62px; }
   .lang {
     margin-top: 8px;
@@ -88,6 +89,7 @@
     <div class="hud">
       <div class="label">SCORE</div><div class="value" id="score">0</div>
       <div class="label">LEVEL</div><div class="value" id="level">1</div>
+      <div class="rules" id="rules"></div>
       <div class="label">COMBO</div><div class="value small" id="combo">x1</div>
       <div class="label">LIVES</div><div class="value small" id="lives">♥♥♥</div>
       <div class="label">BOMBS</div><div class="value small" id="bombs">◆◆◆</div>
@@ -100,7 +102,7 @@
   </div>
   <div class="hint">
     <kbd>Enter</kbd> — начать игру · <b>мышь</b> — наводить пушку (или <kbd>←</kbd> <kbd>→</kbd>)<br>
-    Подведи пушку под блок и напечатай <b>недостающую букву</b><br>
+    Наведи ствол на <b>сам пропуск</b> и напечатай недостающую букву<br>
     <b>клик</b> или <kbd>Space</kbd> — подрыв блока на линии огня · <kbd>Esc</kbd> пауза
   </div>
 </div>
@@ -128,158 +130,222 @@
          "castle dragon knight planet rocket bridge window flower silver " +
          "winter summer spring autumn market school letter number").split(" "),
   };
-  // Слова, которые в блоках не появляются, но засчитываются как верный ответ.
-  // Нужны, чтобы не наказывать за честную альтернативу: Л_С — это и ЛЕС, и ЛИС.
-  const EXTRA = {
-    ru: ("бак бал бар бас бег бок бор бот бук бык вал вар век вес вид вол выл " +
-         "гам гол гул дар дед дым дар дуб дух душ жар жир зал зов зуб кит кол " +
-         "ком кон кум лад лак лев лис лоб лом луг люк маг мак мал мел мех мир " +
-         "мор мох муж мыс нас нос пар пас пат пик пир пол пот пух пыл рак рис " +
-         "рог род рок рот ряд сан сок сор сук сыр сыч так там тик ток том тон " +
-         "тук тур тыл фон хор цех час чан шаг шар шум щит эхо " +
-         "вода мода сода коса роса роза коза лоза лиса липа лапа лупа сова " +
-         "сила сало село дело тело мыло сено окно поле воля доля боль соль " +
-         "моль роль пыль даль дичь ночь дочь речь печь мышь рожь ложь " +
-         "рука мука лужа нога дуга губа гриб краб " +
-         "арка база бант банк беда бинт блок бобр брат буря ваза воля ворс " +
-         "враг врач гора дама дата дача доза дума душа дыра жаба жара желе " +
-         "жила заря зима знак звук зона зубр игла игра икра изба июнь июль " +
-         "кожа кора коса кофе кран круг куст лыжи люди мама мера мост муха " +
-         "небо нора ноша нить овца орех очки папа пара парк паук пила план " +
-         "плащ плот пляж порт пост пуля путь рама рана риск руда рыба сани " +
-         "свет слон сорт спор срок стол стул суть тень тигр тина туча угол " +
-         "удар узел улей утка факт флаг флот фонд фото холм храм цвет цепь " +
-         "цирк чаша часы чудо шаль шарф шкаф щека щука этаж юбка юмор яйцо " +
-         "ярус " +
-         "берег ветер вечер весна время голос гроза дверь земля зверь камни " +
-         "канал карта капля класс книга конус корма линия лодка месяц метро " +
-         "мечта место мысль напор народ огонь озеро песок песня поезд покой " +
-         "полка порог поток право птица пятно рамка речка ручка рынок связь " +
-         "склон слово смысл совет сокол спорт ствол стена столб судно сумка " +
-         "тайна театр товар точка тропа туман удача улица форма холод хвост " +
-         "центр число шапка шляпа штора шутка щенок").split(" "),
-    en: ("bat bad bag ban bar bay bed bee beg bet bid big bin bit bog bow boy " +
-         "bud bug bun bus but cap cot cow cub cue cut dam day den did die dig " +
-         "dim din dip don dot dry dub dug dye ear eat eel elf elk elm end era " +
-         "eye fan far fat fed fee few fig fin fit fix fly foe fog for fry fun " +
-         "fur gap gas gem get gin gum gun gut guy had ham has hat hay hen her " +
-         "hid him hip his hit hoe hog hop hot how hub hue hug hum hut ice ill " +
-         "ink inn ion its ivy jam jar jaw jet job jog joy jug keg kid kin kit " +
-         "lab lad lag lap law lay led leg let lid lie lip lit lob log lot low " +
-         "mad man map mat may men met mid mix mob mop mud mug nap net new nod " +
-         "nor not now nun nut oak oar oat odd ode oil old one orb ore our out " +
-         "owe own pad pan par pat paw pay pea peg pen pet pie pin pit pod pot " +
-         "pub pun pup put rag ram ran rap rat raw ray rib rid rig rim rip rob " +
-         "rod rot row rub rug rum rut sad sag sap sat saw say set sew she shy " +
-         "sin sip sir sit six ski sly sob sod son sow soy spy sub sue sum tab " +
-         "tag tan tap tar tax tea ten the tie tin tip toe ton too top tow toy " +
-         "try tub tug two urn use van vat vet vow war was wax way web wed wet " +
-         "who why wig win wit woe wok won you zip zoo " +
-         "bake cake lake make rake take wake bare care dare fare hare mare " +
-         "bean bear beat heat meat neat seat best rest test nest west pest " +
-         "bell cell fell sell tell well yell bill fill hill kill mill pill " +
-         "band hand land bind find kind mind bond fond pond bang gang hang " +
-         "rang sang ring sing wing bark dark lark mark park cart cast fast " +
-         "last mast past coat goat boat bolt colt gate late mate rate gale " +
-         "male pale sale tale tame fame game name same wine dine fine line " +
-         "mine nine vine hope rope cope note vote hole mole pole role sole " +
-         "back hack lack pack rack sack tack deck neck peck dock lock mock " +
-         "rock sock duck luck muck puck tuck " +
-         "light night might right sight tight fight " +
-         "house hours mouse moose goose loose " +
-         "store stole stove stone shone " +
-         "glass brass grasp grass class " +
-         "break dread tread bread " +
-         "cable fable table " +
-         "block cloak clock crock " +
-         "lower power tower " +
-         "cream dream " +
-         "round pound mound bound found hound sound wound " +
-         "lance dance " +
-         "plane place plate plant " +
-         "brain drain grain train trail " +
-         "chain chart charm chair " +
-         "sheet sweet sleet " +
-         "spare spore spire " +
-         "stain stair stack stalk " +
-         "whale while white write " +
-         "crown brown crows " +
-         "pocket locket socket rocket " +
-         "bridge fridge " +
-         "slower blower flower " +
-         "better butter bitter litter letter " +
-         "winner wither winter " +
-         "string spring sprint").split(" "),
-  };
-  // Частотные словари: нужны только для проверки ответа, в блоках не спавнятся.
-  // Блок между маркерами генерируется скриптом tools/build-wordlist.mjs —
-  // руками не править.
-  // >>> BULK-WORDLIST START <<<
-  const BULK = {
-    // 653 слов, https://raw.githubusercontent.com/hermitdave/FrequencyWords/master/content/2018/ru/ru_50k.txt
+  // >>> WORDLIST START <<<
+  const META = {
+    // 97 слов, ранг и соседи из https://raw.githubusercontent.com/hermitdave/FrequencyWords/master/content/2018/ru/ru_50k.txt
     ru:
-    "бад бай бак башне башни башню бев бес била бит боле бом бон бора брай брак брал бремя брет брит " +
-    "брок брут букве букву буквы вай ваша вебер века верна вес весла весну весны ветер вето вечер " +
-    "вечна вида вила вир воде воду воды вождь воле воли волн воль волю воля вон вона вонь вора воск " +
-    "вот врат вытер гад гай гера гила гир гога года голод гон горд горе гори горн горо горой горох " +
-    "гору горы горю горя гроша груба груза груши губ гук дай дак дам дама дань двери деб дев дель дем " +
-    "дени дент день дерева дереве дереву дес десь деть дешево динь дит днм дов дог дожди дождя доз " +
-    "док доле дон дора дот доу дочь дуг дуй дул дух душ дым дыр дэб жак жила жир жуй жук жучка зад " +
-    "зак звезде звезду звезды зверь зев земле земли землю зива зиму зимы зон зуб зума игла игре игру " +
-    "игры икра йода кай как кака кала кана кара кароль каса каши кашу кев кес кид кий ким кима кин " +
-    "кинь кип кис киса кит киф киша кишка клич клюв книге книги книгу код кода кое коз кои кой койка " +
-    "кок кол коль ком кон кона конг коне кони коно кону коня коп кор кора коре корове корову коровы " +
-    "короле короли королю короля корона корь кот кошке кошки кошку круг куб кук куп кучка кэт лав лад " +
-    "лай лак лама лана лапа лас леа лев лево лег лего лед лез лей лем лен лена лень лео лес леса лет " +
-    "лета лети лету лея лив лига лиза лик лила лима лина липа лир лира лис лист лису лисы лись лито " +
-    "лица лок лом лон лора лоре лос лот лото лужа луи лук лука лун луне луну луны луч луча лэс люк " +
-    "мага май мак мака мала маме мамина маму мамы мана мар мара марина маша машине машину машины " +
-    "медведи медведя мер мере мес мест места меч мечте мечту мечты миа миг мид мии мик мил мила мин " +
-    "мио мире мис миса миф мию мия мода моде моет може молодо молока молоке мон моне мор мора морг " +
-    "морз мори моро морс морт морю моря мосс моче моше мук мур мыть мыши мышц мэр мяу над най нак нас " +
-    "наша неба небе небу него немо неро нес нила нима ноа ног нож ной ноль нора норе нот ночи ноя нтс " +
-    "нуна одень одно окна окне окну олень оон осени очень очно паба пай пак пака пакета пала пале " +
-    "пана папе папу папы пара паша пень пес песне песни песнь песню петер пила пир пит позе пола поли " +
-    "полк поло полу полы поль полю поля пон попа попе пора пост пот поте права прок птице птицу птицы " +
-    "пук пуле раб раба рад раз рай рака ракете ракету ракеты рал рам рама ран ранец рас раф раш раша " +
-    "раю рая рвет рев рек реке реки рекс реку рик рика рима риса роб роба ров рог род рода роз рой " +
-    "рок рока ром рон рос рост рот роу рою роя рук рука рут ручке ручки ручку рыбе рыбу рыбы рыцари " +
-    "рыцаря сай сал сам сама сан сас сау саша свел свен свр села сен сер сестре сестру сестры сеул " +
-    "сжег сид сида силе сили силу силы син сир сказке сказки сказку слова слове слову смазка собаке " +
-    "собаки собаку сов сок сол сола солнца солнцу сос соу соул срок стал стил стой стол стом стон " +
-    "стоп стою стоя стро стук стул суд сует суй сук сун сучка счет сын сыт сэн сэр сян тай так таша " +
-    "тель тени тень течь тима тир толк том тон тора тост тот точь траве травм траву травы трата тремя " +
-    "тук тунец туп тянь укола урод урон уток утра утру фила фон хай хак хека хит хода хон хора хоре " +
-    "хот хук цвет цветов цветом цев чад чак чан чао чар час чат чаша чаю чая чей чека числа числе " +
-    "числу чисто чой чон шила школе школу школы шон щит яблока яблоки",
-    // 372 слов, https://raw.githubusercontent.com/first20hours/google-10000-english/master/google-10000-english-no-swears.txt
+      "кот 3315 вот тот рот кое код ком коп кит кэт кон кол хот пот кой дот лот кок коз нот кор кои;" +
+      "дом 214 том дам дон док ком дым дем ром доу дот дов дог бом лом днм доз;" +
+      "лес 2454 лет лео вес лед пес лев лос лас лен мес лис нес леа лег лез дес лея бес лей кес лэс лем;" +
+      "мир 355 мэр мин мер сир миг мик миа мур лир миф мил жир мия мор пир мид мии мис вир мар гир мию тир мио;" +
+      "сон 926 сын вон дон шон сок сан рон чон тон фон хон пон оон кон бон сун сол син гон соу мон сов зон сен лон сос сэн сян;" +
+      "сад 3209 сам над рад суд зад сан сид гад бад сай сас чад лад сау сал;" +
+      "мяч 1809 меч мяу;" +
+      "рот 1030 вот тот рой кот рон роз рут рок род роб рос ром хот пот роя дот рог лот роу нот ров рою;" +
+      "нос 1506 нас нож ног ноа лос рос ной нес нтс ноя нот сос;" +
+      "сыр 3393 сэр сын сир сыт сер дыр свр;" +
+      "чай 1531 дай час чак рай чан чей чая чаю кай чао гай тай хай сай май бай лай чой чад вай чат пай най чар;" +
+      "лук 7672 рук люк луи луч кук тук сук жук лак лок лун хук лик мук гук пук;" +
+      "дуб 18264 дух душ зуб деб губ дуй дуг дэб куб дул;" +
+      "жук 14358 рук жак лук кук тук сук хук жуй мук гук пук;" +
+      "рак 2222 как так раз рад рук чак рик мак зак рай пак рок бак ран раю жак раб дак раш рая рас лак хак рам рек рал раф нак;" +
+      "кит 3466 ким пит кот кэт щит кин хит кид бит дит кис киф кип кий;" +
+      "лев 5582 лет лео лес лив лед кев дев лен леа лег лез лея лав рев лей бев лем зев цев;" +
+      "ключ 1023 клюв клич;" +
+      "стол 1376 стал стой стоп стою стул стоя стил стон стом;" +
+      "стул 3722 стал стол стук сеул стил соул;" +
+      "окно 1423 одно окна окне окну очно;" +
+      "дверь 379 двери вверх дворе тварь зверь даешь зверя двора еперь звери сверх двору джери эвери дрель доешь авель;" +
+      "книга 1501 книгу книги книге круга криса снега анита кинга крика крича карга аника гнида;" +
+      "мышь 5692 мыть мыши мышц;" +
+      "ручка 5624 шутка сучка точка дочка ручку сумка ручки кучка пушка риска тачка сучки рынка ночка рыбка куска сучку душка почка решка пачка ручей кучку жучки бочка губка кубка будка кучки ручья ручке чутка ручек жучка сучке гудка;" +
+      "город 552 готов голос народ хорош герой горло повод сорок горит порой молод героя поход годом горах дорог герои ворот голод холод доход голой коров порог годов горле горят воров порох мороз ворон голов говор гордо горла горем хором вором гонок горки горой порок горох горел горяч лорой довод горда горди горам горлу сброд комод герою горка норой горды горан;" +
+      "море 1430 мире мере горе моря мора морг моде морю хоре моше мори моро морс коре моне морт норе лоре моче морз може;" +
+      "река 6032 рука века реки рака реке реку рекс рика рока чека хека;" +
+      "гора 5397 года пора горы горе лора нора гору мора кора вора горд горя горю хора тора гори дора бора горо гера горн гога;" +
+      "поле 1269 полу пола поля воле поль полк полы поло поли позе полю доле поте пуле попе пале боле;" +
+      "небо 2435 него небе неба немо небу неро;" +
+      "звезда 2287 звезды поезда звезду гнезда звезде увезла;" +
+      "солнце 1393 полное солнца полные солнцу кольце;" +
+      "луна 3367 лана луну луны лука лена лина луне нуна луча лужа;" +
+      "ветер 2141 детей вечер питер вещей ведет север велел ветра эстер везет актер верен ведем ветру лютер катер летел потер хезер тетей петер ветки вебер патер декер ветви венец ветка ребер мейер сетей везем ветку ветвь хитер бекер вивер пещер вытер ветке весел ветры бедер веток;" +
+      "дождь 1817 дождя вождь дойду дожди вождя дожил доеду доить доешь;" +
+      "снег 3414 сжег;" +
+      "огонь 983 очень олень одень уголь осень игорь тронь бронь угоне сгинь особь окунь угорь;" +
+      "вода 1223 года воды воду рода воде вида вора кода хода мода вона йода;" +
+      "земля 1590 семья земле землю земли петля ремня зелья немая;" +
+      "камень 1833 парень камеры камеру камера камере надень ремень замену замена корень кабель кашель замены капель камина заметь заменю камине замене;" +
+      "дерево 2209 передо дерева дереве дерека дешево дереву деверо мертво дерзко дереку;" +
+      "цветок 4489 цветов светом клеток цветом свиток цветка цветах цветут цветам;" +
+      "трава 7281 права брата право слава правы глава браво врача брака врага врата труда трата драка травы фраза трупа брала кража траву праву врала драма трамп труба трать графа трачу храма травм праве траве дрова триша трона ирака срыва нраву транс крана ирана крала траур шрама урана тропа прада краба труса тыква орала траты чрева праха краха трека траст;" +
+      "птица 3744 улица птицы пицца стива птицу психа перца псина плита птаха этика птице певца приза;" +
+      "рыба 3169 рыбу рыбы раба рыбе роба;" +
+      "волк 4525 воли воле волю воля толк полк волн воск воль;" +
+      "лиса 9475 лица лиза леса лист лина лила риса лига киса лира липа миса лису лисы лима лись;" +
+      "медведь 4393 медведя медведи;" +
+      "заяц 17128;" +
+      "конь 7003 кону коня вонь коль коне конг коно кони кинь корь кона;" +
+      "корова 5331 готова города король голова короля короче дорога хороша ворота какова королю борода корону коровы корову сорока короли корона пороха короны котора ворона порога порода дорота короне короле мороза кореша корица корове порока логова;" +
+      "собака 1466 собаку собаки собаке сорока табака рыбака собора;" +
+      "кошка 4250 когда конца пошла точка сошла дочка лодка вошла кошки кучка пушка кошек фишка кишки кошку гонка шишка волка водка ночка козла доска чашка киска полка кишка башка мишка куска дошла корки тонка тоска коула попка йорка кобра ложка коста фотка душка мешка почка койке мышка койку решка корра пешка кирка крика бочка кокса кубка вышка кепка корма койка толка койки кошке ковра горка ломка соска крюка ножка крэка воска;" +
+      "друг 152 круг;" +
+      "брат 352 брак брал врат брет брай брут брит;" +
+      "сестра 543 сестры сестру сестре центра сестер севера театра честна костра экстра;" +
+      "мама 145 сама маме мамы маму дама мара мала мака маша рама мага лама мана;" +
+      "папа 224 пара папы папе папу паша попа пала паба пака пана лапа;" +
+      "школа 1773 около школе школу школы стола шейла акула шкале скала скота шкафа сколь уколы шкура укола виола;" +
+      "урок 1726 срок урод уток урон брок прок;" +
+      "слово 494 снова скоро плохо слова слава слева слову славы славу клево слона влево слоан слове слабо сложа злого славе слепо слоны слоем слоун шломо скаво слоев сложи сливы;" +
+      "буква 10224 битва буквы кукла букет букву бекка будда бакса будка бокса бухта бухла тыква бунта букве курва;" +
+      "число 2710 часто чисто масло числа числе чиста сиско чисты циско русло диско чисел числу ласло росло;" +
+      "время 62 всему всеми вреда тремя врешь бремя племя врежь крема врежу фрейя врете;" +
+      "день 98 тень дань дель десь лень динь пень дени деть дент;" +
+      "ночь 322 ночи дочь ноль точь;" +
+      "утро 440 утра утру стро;" +
+      "вечер 470 вещей вечно ведет ветер север велел нечем везет арчер течет верен ведем хезер петер вебер речей декер венец ребер мейер везем мечей бекер вивер пещер вытер весел вечна бедер;" +
+      "зима 8023 рима тима зиму зива зимы кима лима нима зума;" +
+      "весна 8292 верно места вести вечно война песню песня песни верни верну важна ветра теста волна тесно песне весит верна верны ванна весть рейна весом песка воина тесса весны ведра зерна видна леона шейна кейна песнь несла виста ветка несса верха весну ценна сенна тесла весов весил месса весла кенна жеста весел вечна сосна воска;" +
+      "лето 2514 лета лети лево лету вето лего лито лото;" +
+      "осень 12926 очень огонь отель хрень одеть оленя олень одень одену очешь осени олени орешь оцени особь окунь;" +
+      "хлеб 2830;" +
+      "молоко 2641 только золото молока моложе молода яблоко молоды милого болото малого колько монако котоко молодо голого молоть молоке;" +
+      "сахар 4970 самая салат нахер сарае сарай радар сухая базар хадар загар салам сигар нахал сарая самир ламар шахир махал сезар;" +
+      "каша 17859 ваша наша кара саша кашу таша чаша паша кана кака маша кала каши каса киша раша;" +
+      "суп 2913 суд сун куп сук суй туп;" +
+      "яблоко 5908 молоко яблоки облако яблони яблока;" +
+      "груша 30850 друга грудь груди грубо труда крыша групп трупа круга гроша труба греха графа глуши глупа гроза грета грега триша грина гроба груза грома гроши грэма груши груба круза крута пруда труса грыжа груби грубы грущу;" +
+      "машина 588 машину машины машине тишина марина вагина сабина папина мамины макино камина карина давина мамина мамину мамино молина мариса марино лавина малика гадина кабина медина;" +
+      "поезд 1547 поеду повод поход поешь звезд поели съезд побед выезд поела заезд въезд наезд поете ползи;" +
+      "ракета 7415 работа ракеты газета ранена ракету заката пакеты пакете пакета ракель дакота такера карета хакера балета ракете завета;" +
+      "мост 3542 мест пост тост рост мосс моет морт;" +
+      "замок 1978 самом самое замуж самой мамой закон разок залог замке замка завод зимой забор замки забот задом намек замри жалок рамон марок дамой банок засек часок мазок заком бабок рамос замку сумок комок каток заход запор залом засос загон масок замен рюмок замер;" +
+      "башня 9595 парня барни башку камня барнс башни башню башне башке башка банни кашля бойня броня башир башки вишня башен;" +
+      "король 1056 короля короче пароль королю корова корону коровы мораль корову корень короли корона короны кароль форель кормлю короне коготь колоть пороть кобель короле корове мозоль;" +
+      "рыцарь 6934 рыцари рыдать рыцаря рылась;" +
+      "дракон 6047 браком браков флакон;" +
+      "сказка 8323 сказал сказав сказки ставка сказку скачки сказке скидка старка сказок свалка смазка смазки;" +
+      "песня 1485 парня песню песни пенни песен песок весна тесно песне песка перья песке весны пения резня песнь петля песик ремня весну пенья пески песет;" +
+      "танец 2835 конец ранее палец ранен танцы тянет такер танго танца теней нанес танки самец тонет танце малец тунец манер венец жанет тянем капец ранец танка телец танке;" +
+      "игра 876 игры игру игре игла икра;" +
+      "мечта 2408 место месте места черта мертв нечто мечты марта месть мести месту мечту почта моста теста мечом метра цента мэтта берта мечте кента нейта лента метка мешка дейта медиа секта мечей метти менты месса мечах жеста вечна;" +
+      "сила 1511 силы силу жила силе пила села нила мила лила фила била сида вила шила сили гила сола;" +
+      "свет 709 счет цвет свен рвет свел сует;" +
+      "тень 3591 день тени лень течь пень тель тянь",
+    // 96 слов, ранг и соседи из https://raw.githubusercontent.com/first20hours/google-10000-english/master/google-10000-english-no-swears.txt
     en:
-    "ace apply bad bag ball ban band bar bat bay beam bean beat bed beer ben best bet better big bill " +
-    "bind bit block bob boc bold bon bool boom boot bound bow box boy brass break breed broad but cab " +
-    "cable cad cafe cage cake cal call cam came can cap cape car care cas case cat cattle cave cdt " +
-    "cet cfr chain chip choir cir click cod col cold com con cook cop cos cream cst cut dam dat deaf " +
-    "dear den dig dish doc dock dod doe dom don doom dos dot dow ear eat eight eng fake fall far fare " +
-    "fat fax fear fed feed fig fight file fill find fine firm fist five fix fog fold foo for found " +
-    "fox free fridge from fun gain gear gen gig glass golf good grams gross gun hall ham hand hat " +
-    "hear her hey hire hold hon hook horse house how hull icq ict ide jake jan jar jay jill jim jun " +
-    "kay ken kill kind king know kong lace lake lance land lane lat late later latter lead lean led " +
-    "len leon light like liver load lock log look low lower luke main make mall mar marked marker mat " +
-    "med men might mild mile mill mind mold mood mouse nam nat near need next niger night noon now " +
-    "oil own pain pam par pat pen pest pic pie pill pin ping pit pix planes pocket poor pound power " +
-    "rack raid rail ram ran rand rat read rear rec reed ref reg rep res rest rev rick rid rider right " +
-    "ring rod ron round rover row rug run said sake sam san sans sat say sec see seek seem seen sees " +
-    "sen send seo sep seq ser set shake shed shop show sig sight silk sin sing ski skip sku slip slow " +
-    "soa socket sold son soon sox spa sprint spy stake stan stat stay store storm string sub sue sum " +
-    "sun sur take tall tar tea tear ted ten test thee tight till timer tion tire told toner took trek " +
-    "treo true var vat wake walk walt war wear wed weed well west wild will wine wing winner wins " +
-    "wire wish worse would wound wow yea year yen zen",
+      "cat 1456 can car sat cut fat eat cap hat cam vat pat cst cal lat cad rat mat cab cet bat nat cdt cas dat;" +
+      "dog 889 log doc dot don dos doe dod dig fog dom dow;" +
+      "sun 548 san run fun jun son sub gun sum sin sur sue sen;" +
+      "sky 2283 say ski spy sku;" +
+      "sea 1112 see set sep sec spa tea seo ser yea seq sen soa;" +
+      "car 194 can war mar far bar cat var cap cam par ear cal cad cab cfr tar jar cas cir;" +
+      "cup 1503 cut cap cop;" +
+      "key 482 hey ken kay;" +
+      "box 377 boy bob fox bow sox bon boc;" +
+      "run 569 sun fun jun gun ran ron rug;" +
+      "red 470 wed bed led ref res med reg rep rod rev fed ted rec rid;" +
+      "ice 1608 ace icq ide ict;" +
+      "owl 99999 own oil;" +
+      "fox 2533 for box fax fix sox foo fog;" +
+      "bat 5525 but bad bit bay bar sat fat cat bag eat hat vat bet pat lat ban rat mat nat dat;" +
+      "cow 5278 now how low com con row wow cod bow col cos dow cop;" +
+      "pig 5865 big pic pin fig pie pit dig sig gig pix;" +
+      "hen 99999 her men ten hey ben ken pen den gen hon zen len yen sen;" +
+      "egg 3883 eng;" +
+      "jam 3962 jan jim cam ram sam jay dam nam ham jar pam;" +
+      "tree 1150 free true trek thee treo;" +
+      "book 136 look took cook boot hook boom bool;" +
+      "star 543 stay stat stan;" +
+      "moon 2233 soon mood noon;" +
+      "fire 814 file five fine firm hire wire tire fare;" +
+      "rain 2341 main pain gain rail raid;" +
+      "snow 1842 know show slow;" +
+      "wind 1567 find mind kind wine wild wing wins bind;" +
+      "road 497 read load;" +
+      "ship 1134 shop skip chip slip;" +
+      "bird 2169 bind;" +
+      "fish 1302 wish dish fist;" +
+      "wolf 3824 golf;" +
+      "bear 2005 year near hear gear wear fear beat rear dear beer beam bean tear;" +
+      "lion 4168 tion leon;" +
+      "frog 5392 from;" +
+      "milk 2777 mile mill silk mild;" +
+      "cake 3228 make take case care lake came cape cafe wake fake cave sake cage jake;" +
+      "door 1211 poor doom;" +
+      "wall 1154 will well call fall hall ball walk mall tall walt;" +
+      "ring 1261 king wing sing ping;" +
+      "king 859 kind ring kong wing sing ping;" +
+      "gold 627 good golf hold told sold cold bold fold mold;" +
+      "sand 3256 said send hand land band rand sans;" +
+      "lake 798 like make take late lane cake wake fake luke lace sake jake;" +
+      "hill 1073 will bill hall fill kill till mill pill hull jill;" +
+      "rock 709 lock rack rick dock;" +
+      "leaf 3795 lead lean deaf;" +
+      "seed 3071 need send seen feed seem seek reed sees shed weed;" +
+      "nest 6807 next best west test rest pest;" +
+      "house 241 hours cause horse abuse mouse route noise worse loose rouge;" +
+      "water 274 after rates paper enter watch later peter rated dates laser wales layer meter maker inter baker dated outer waves gates latex saver wages wider alter watts qatar safer;" +
+      "light 519 right night might limit eight fight tight sight ought highs digit;" +
+      "night 501 right light might eight fight tight sight ought highs digit niger;" +
+      "cloud 4220 close blood clock proud flood crowd cloth clone lloyd floyd flour blond;" +
+      "river 873 never given cover gives lives refer lived fiber roger tiger liver saver lover rider fever rover wider timer rides wives dover mixer niger;" +
+      "stone 1580 state store phone stock story style score stage stand steve alone scene scope storm smoke shore spoke stood clone stops slope leone shine ozone spine stake;" +
+      "grass 3856 class press cross glass grand grade grant goals guess dress grace gross graph crash brass trans grain trash grave craps grows draws grams;" +
+      "horse 1171 house force mouse noise worst nurse worse loose verse purse forge;" +
+      "mouse 1922 house movie cause horse mount abuse route noise mouth moore worse loose monte rouge;" +
+      "tiger 3690 times river tower tight fiber roger liver tired toner rider wider tires anger timer tyler tuner mixer niger tiles;" +
+      "snake 5583 state space share stage scale shape smoke spoke slave spare brake shade shake shame blake stake;" +
+      "bread 3722 great areas brand break dream brian ahead cream broad treat trend blend bryan breed;" +
+      "apple 1365 apply angle maple;" +
+      "table 389 title cable bible taste eagle noble maple tahoe;" +
+      "chair 1630 their chris claim chain chart craig chase charm blair chaos choir;" +
+      "clock 2328 click black check stock close block clark crack shock clerk cloud cloth chuck clone chick knock;" +
+      "sword 5036 store story short score sport award storm shore stood;" +
+      "tower 2800 power poker cover lower roger tiger tones towns fewer toner lover rover timer tyler newer tuner dover token;" +
+      "dream 1929 great areas break dress cream treat bread steam;" +
+      "sound 679 would could south found young round stand count solid mount spend bound pound squad wound souls;" +
+      "music 94 basic magic cubic;" +
+      "dance 1346 since range hence nancy sauce ranch fancy danny fence lance dense;" +
+      "story 477 store stock start study short score sport stars stone sorry storm glory shore stood stops sword ivory scary;" +
+      "world 87 would could works words worth worst worse worry wired wound bored;" +
+      "earth 1121 north march party parts early worth birth faith sarah forth perth marsh;" +
+      "ocean 2008 clean organ;" +
+      "forest 1549 format lowest forgot forget honest finest arrest;" +
+      "garden 561 golden gordon warren burden harder garmin carmen maiden;" +
+      "castle 2999 battle candle cattle;" +
+      "dragon 3121 oregon;" +
+      "knight 3942 weight flight height bright wright slight;" +
+      "planet 2344 player places plants placed played plates planes;" +
+      "rocket 5655 pocket ticket hockey jacket packet socket locked;" +
+      "bridge 1854 brings bridal fridge;" +
+      "window 659 wisdom willow;" +
+      "flower 1933 shower closer;" +
+      "silver 922 server seller filter miller sister singer killer solved;" +
+      "winter 1334 center wanted filter hunter writer dinner sister wonder winner finder finger walter singer;" +
+      "summer 1017 number summit suffer hammer bumper;" +
+      "spring 1058 during strong string saying seeing saving skiing hiring sprint caring boring sewing wiring;" +
+      "autumn 4723 auburn;" +
+      "market 395 target basket marked jacket packet parker carpet marker magnet marvel;" +
+      "school 126 scroll;" +
+      "letter 1012 center better matter leader potter latter butter lender luther lesser heater;" +
+      "number 107 member summer rubber timber bumper",
   };
-  // >>> BULK-WORDLIST END <<<
+  // >>> WORDLIST END <<<
 
-  const DICT = {
-    ru: new Set([...WORDS.ru, ...EXTRA.ru, ...BULK.ru.split(" ").filter(Boolean)]),
-    en: new Set([...WORDS.en, ...EXTRA.en, ...BULK.en.split(" ").filter(Boolean)]),
-  };
+  // На каждое слово строка «слово ранг сосед сосед ...», её собирает
+  // tools/build-wordlist.mjs. Ранг — место в частотном списке, то есть ось
+  // «насколько слово ходовое». Соседи — настоящие слова той же длины,
+  // отличающиеся не более чем двумя буквами: из них считается, какие буквы
+  // засчитывать в пропуски.
+  const INFO = { ru: new Map(), en: new Map() };
+  for (const lg of ["ru", "en"]) {
+    for (const entry of META[lg].split(";")) {
+      if (!entry) continue;
+      const [word, rank, ...neighbours] = entry.split(" ");
+      INFO[lg].set(word, { rank: +rank, neighbours });
+    }
+  }
+
   const ALPHABET = {
     ru: "абвгдежзийклмнопрстуфхцчшщъыьэюя",
     en: "abcdefghijklmnopqrstuvwxyz",
@@ -314,6 +380,7 @@
     combo: document.getElementById("combo"),
     lives: document.getElementById("lives"),
     bombs: document.getElementById("bombs"),
+    rules: document.getElementById("rules"),
     msg:   document.getElementById("msg"),
   };
 
@@ -345,33 +412,69 @@
     syncHud();
   }
 
+  // ---------------------------------------------------------------- сложность
+  // Порядок рычагов сознательный: сначала растёт длина слова, потом в ход идут
+  // менее ходовые слова, потом появляется второй пропуск, и только в последнюю
+  // очередь ускоряются блоки. Скорость — самый грубый рычаг: она давит на
+  // моторику, а не на голову, поэтому за восемь уровней прибавляет всего
+  // половину, тогда как раньше утраивалась.
+  const LEVELS = [
+    // len — длина слова, rank — предел частотности (чем больше, тем реже
+    // слово встречается в речи), gaps2 — доля блоков с двумя пропусками
+    { len: [3, 4], rank:  1500, gaps2: 0,    speed: 20 },
+    { len: [3, 5], rank:  1500, gaps2: 0,    speed: 21 },
+    { len: [3, 5], rank:  4000, gaps2: 0,    speed: 22 },
+    { len: [4, 6], rank:  4000, gaps2: 0,    speed: 23 },
+    { len: [4, 6], rank: 10000, gaps2: 0.2,  speed: 24 },
+    { len: [4, 7], rank: 10000, gaps2: 0.35, speed: 26 },
+    { len: [5, 7], rank: 99999, gaps2: 0.5,  speed: 28 },
+    { len: [5, 8], rank: 99999, gaps2: 0.65, speed: 30 },
+  ];
+  const WORDS_PER_LEVEL = 8;
+
+  function rules() {
+    const last = LEVELS[LEVELS.length - 1];
+    if (level <= LEVELS.length) return LEVELS[level - 1];
+    // дальше упирается только скорость, по 1.5 px/s за уровень
+    return { ...last, gaps2: 0.75, speed: last.speed + (level - LEVELS.length) * 1.5 };
+  }
+
   // ------------------------------------------------------------ блоки-слова
   function makeBlock() {
-    const list = WORDS[lang];
-    // на старших уровнях слова длиннее
-    const maxLen = level < 3 ? 5 : level < 6 ? 7 : 99;
-    const pool = list.filter(w => w.length <= maxLen);
-    const word = pool[(Math.random() * pool.length) | 0];
-    const gap = (Math.random() * word.length) | 0;
+    const r = rules();
+    const info = w => INFO[lang].get(w) || { rank: 99999, neighbours: [] };
+    let pool = WORDS[lang].filter(w =>
+      w.length >= r.len[0] && w.length <= r.len[1] && info(w).rank <= r.rank);
+    // на всякий случай: правила не должны оставлять игру без слов
+    if (!pool.length) pool = WORDS[lang];
 
-    // честность: принимаем любую букву, дающую слово из того же словаря
-    const accepts = new Set();
-    for (const ch of ALPHABET[lang]) {
-      const candidate = word.slice(0, gap) + ch + word.slice(gap + 1);
-      if (DICT[lang].has(candidate)) accepts.add(ch);
+    const word = pool[(Math.random() * pool.length) | 0];
+    const maxGaps = word.length <= 4 ? 1 : 2;   // столько же считал генератор
+    const gapCount = Math.random() < r.gaps2 ? maxGaps : 1;
+
+    const gaps = [];
+    while (gaps.length < gapCount) {
+      const i = (Math.random() * word.length) | 0;
+      if (!gaps.includes(i)) gaps.push(i);
     }
-    accepts.add(word[gap]);
+    gaps.sort((a, b) => a - b);
 
     const w = 26 + word.length * 21;
     const b = {
-      word, gap, accepts,
+      word,                                  // загаданное слово
+      shown: word.split("").map((ch, i) => gaps.includes(i) ? "" : ch),
+      gaps,
+      rank: info(word).rank,                 // редкость загаданного, не собранного
+      // все слова, которые ещё могут получиться: из них считаются верные буквы
+      options: [word, ...info(word).neighbours],
       w, h: 40,
       x: 0,
       y: -40,
-      speed: 20 + (level - 1) * 4.5,
+      speed: r.speed,
       state: "live",
       timer: 0,
     };
+    filterOptions(b);
     // ищем позицию, не налезающую на свежие блоки сверху
     for (let attempt = 0; attempt < 12; attempt++) {
       b.x = 10 + Math.random() * (W - 20 - w);
@@ -383,6 +486,29 @@
   }
 
   function spawn() { blocks.push(makeBlock()); }
+
+  // Оставляем только те слова, что ещё сходятся с открытыми буквами.
+  // Загаданное слово в списке всегда, так что верный ответ не потеряется.
+  function filterOptions(b) {
+    b.options = b.options.filter(o =>
+      o.length === b.word.length && b.shown.every((ch, i) => !ch || o[i] === ch));
+  }
+
+  // Какие буквы засчитываются в конкретный пропуск. Считаем по оставшимся
+  // вариантам, поэтому в двухбуквенном пропуске буквы проверяются совместно:
+  // после первой попавшей буквы список сужается, и вторая уже строже.
+  function acceptsAt(b, i) {
+    const out = new Set();
+    for (const o of b.options) out.add(o[i]);
+    return out;
+  }
+
+  // Номер буквы под выстрелом — сетка ячеек внутри блока.
+  function cellAt(b, x) {
+    const step = (b.w - 26) / b.word.length;
+    const i = Math.floor((x - (b.x + 13)) / step);
+    return i >= 0 && i < b.word.length ? i : -1;
+  }
 
   // ----------------------------------------------------------------- стрельба
   // Наводки нет: буква уходит строго вверх из текущей позиции пушки
@@ -423,34 +549,55 @@
     syncHud();
   }
 
-  function solve(b, letter) {
-    // показываем слово именно с той буквой, которой в него попали
-    if (letter) b.word = b.word.slice(0, b.gap) + letter + b.word.slice(b.gap + 1);
+  // Буква попала в пропуск и подошла. Слово с двумя пропусками так
+  // закрывается в два выстрела, и очки за него идут только целиком.
+  function fill(b, i, letter) {
     lastKeyOk = true;
+    b.shown[i] = letter;
+    filterOptions(b);
+    burst(b, 6);
+    if (b.shown.some(ch => !ch)) {         // остались пропуски
+      setMsg("Есть!<br>Осталось: " + b.shown.filter(ch => !ch).length);
+      return;
+    }
+    solve(b);
+  }
+
+  function solve(b) {
+    // засчитываем то слово, которое собрал игрок, а не загаданное
+    b.word = b.shown.join("");
     combo++;
     bestCombo = Math.max(bestCombo, combo);
     solved++;
     const mult = Math.min(1 + Math.floor(combo / 5), 5);
-    score += (50 + b.word.length * 25) * level * mult;
+    score += wordScore(b) * mult;
     b.state = "solved";
     b.timer = 0;
     burst(b, 14);
-    if (solved % 8 === 0) levelUp();
+    if (solved % WORDS_PER_LEVEL === 0) levelUp();
     if (solved % 10 === 0 && bombs < 5) { bombs++; setMsg("+1 заряд"); }
     syncHud();
   }
 
-  // буква прилетела в блок, которому она не подходит
-  function miss(b) {
+  // Очки по той же шкале, что и сложность: длина, редкость, число пропусков.
+  function wordScore(b) {
+    // ранг именно загаданного слова: собранная альтернатива не должна
+    // приносить больше очков только потому, что её нет в данных
+    const rarity = b.rank <= 1500 ? 1 : b.rank <= 4000 ? 1.4
+                 : b.rank <= 10000 ? 1.8 : 2.4;
+    return Math.round((20 * b.word.length + 60 * b.gaps.length) * rarity);
+  }
+
+  // буква прилетела в блок, но не подошла
+  function miss(b, why) {
     lastKeyOk = false;
     combo = 0;
     shake = Math.max(shake, 7);
-    // показываем шаблон, а не загаданное слово — иначе промах выдаёт ответ
     if (b) {
       b.hurt = 0.35;
-      const mask = b.word.split("")
-        .map((ch, i) => i === b.gap ? "_" : ch.toUpperCase()).join("");
-      setMsg("Не подходит:<br>" + mask);
+      // показываем шаблон, а не загаданное слово — иначе промах выдаёт ответ
+      setMsg(why + "<br>" +
+        b.shown.map(ch => ch ? ch.toUpperCase() : "_").join(""));
     }
     syncHud();
   }
@@ -458,7 +605,9 @@
   function levelUp() {
     level++;
     spawnInterval = Math.max(750, 2400 - (level - 1) * 165);
-    setMsg("LEVEL " + level);
+    const r = rules();
+    setMsg("LEVEL " + level + "<br>слова " + r.len[0] + "–" + r.len[1] + " букв" +
+           (r.gaps2 > 0 ? "<br>бывает 2 пропуска" : ""));
     flash = 1;
   }
 
@@ -526,12 +675,16 @@
         if (b.state === "solved" || b.state === "dead") continue;
         if (s.x < b.x || s.x > b.x + b.w) continue;
         if (s.y > b.y + b.h || s.y < b.y) continue;
-        if (b.accepts.has(s.letter)) solve(b, s.letter);
-        else miss(b);
+
+        // Куда именно попали: пропуск наводится по горизонтали, как и блок.
+        const i = cellAt(b, s.x);
+        if (i === -1 || b.shown[i]) miss(b, "Тут уже<br>есть буква:");
+        else if (acceptsAt(b, i).has(s.letter)) fill(b, i, s.letter);
+        else miss(b, "Не подходит:");
         return true;
       }
 
-      if (s.y < -20) { miss(null); return true; }   // ушёл в молоко
+      if (s.y < -20) { miss(null, ""); return true; }   // ушёл в молоко
     }
     return false;
   }
@@ -641,11 +794,20 @@
     ctx.textBaseline = "middle";
     const step = (b.w - 26) / b.word.length;
     const startX = b.x + 13 + step / 2;
+    // ячейка, в которую сейчас смотрит ствол
+    const aimedCell = isTarget && !solvedNow && !dead ? cellAt(b, cannonX) : -1;
+
     for (let i = 0; i < b.word.length; i++) {
       const cx = startX + i * step, cy = b.y + b.h / 2 + 1;
-      const isGap = i === b.gap;
-      if (isGap && !solvedNow) {
-        // пустая ячейка под букву
+      const ch = solvedNow ? b.word[i] : b.shown[i];
+
+      if (i === aimedCell && !b.shown[i]) {
+        // прицел стоит на пустой ячейке — подсвечиваем именно её
+        ctx.fillStyle = "rgba(43,49,34,.22)";
+        ctx.fillRect(cx - step / 2 + 2, b.y + 4, step - 4, b.h - 8);
+      }
+
+      if (!ch) {
         ctx.strokeStyle = INK;
         ctx.lineWidth = 2;
         ctx.beginPath();
@@ -654,7 +816,7 @@
         ctx.stroke();
       } else {
         ctx.fillStyle = solvedNow ? "#9ead86" : INK;
-        ctx.fillText(b.word[i].toUpperCase(), cx, cy);
+        ctx.fillText(ch.toUpperCase(), cx, cy);
       }
     }
     ctx.restore();
@@ -733,6 +895,14 @@
                            (combo > 1 ? " (" + combo + ")" : "");
     el.lives.textContent = "♥".repeat(Math.max(0, lives)) || "—";
     el.bombs.textContent = "◆".repeat(bombs) || "—";
+
+    // из чего сейчас складывается сложность
+    const r = rules();
+    const band = r.rank <= 1500 ? "частые" : r.rank <= 4000 ? "+ реже"
+               : r.rank <= 10000 ? "+ редкие" : "любые";
+    el.rules.innerHTML = `${r.len[0]}–${r.len[1]} букв · ${band}` +
+      (r.gaps2 > 0 ? `<br>до 2 пропусков` : "") +
+      `<br>скорость ${Math.round(r.speed)}`;
   }
 
   // ---------------------------------------------------------------- ввод
