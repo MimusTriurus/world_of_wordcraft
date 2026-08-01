@@ -12500,13 +12500,26 @@
   // восполняется: каждая трата должна быть решением.
   const TIPS_START = 5;
 
+  // Круги. Победы у забега нет: пройдя все этапы, он начинается заново и
+  // каждый раз быстрее. Скорость выбрана рычагом потому, что она единственная
+  // ни во что не упирается — длина слов кончается на восьми буквах, пропуски
+  // на трёх, бюджет поля на пятнадцати единицах внимания.
+  //
+  // Шаг в 1 px/s был ниже порога различения: блок долетал до линии за 28.6 с
+  // вместо 30.0, и круг 2 не отличался от первого ничем. Пять — видно сразу.
+  const LAP_SPEED = 5;                                  // px/s за круг
+  const LAP_MAX = 10;                                   // потолок стартового круга
+  const speedNow = r => r.speed + (lap - 1) * LAP_SPEED;
+
   // ------------------------------------------------------------- модификаторы
   // Правила, которые выбирает игрок, а не уровень. Хранятся между сессиями.
   const mods = { aim: false, verbs: false, adjs: false, theme: "",
-                 freeTips: false, freeAmmo: false };
+                 freeTips: false, freeAmmo: false, lap: 1 };
   try { Object.assign(mods, JSON.parse(localStorage.getItem("ws-mods") || "{}")); }
   catch { /* испорченная запись — играем с настройками по умолчанию */ }
   if (mods.theme && !THEME_NAMES[mods.theme]) mods.theme = "";   // тема из старой сборки
+  // из записи могло приехать что угодно, вплоть до строки или NaN
+  mods.lap = Math.min(LAP_MAX, Math.max(1, Math.round(mods.lap) || 1));
   const saveMods = () => localStorage.setItem("ws-mods", JSON.stringify(mods));
 
   // Пустая строка — тема не выбрана, слова берутся из всего корпуса.
@@ -12523,6 +12536,13 @@
       { label: "Модификаторы", act: () => { menu.screen = "mods"; menu.index = 0; } },
     ],
     mods: [
+      // Круг задаёт скорость всех этапов разом, поэтому стоит первым: это
+      // самая крупная ручка сложности на экране.
+      { label: "Стартовый круг",
+        value: () => String(mods.lap),
+        hint: "Каждый круг быстрее предыдущего.<br>← → — выбрать, ENTER — следующий",
+        act: () => pickLap(mods.lap % LAP_MAX + 1),
+        cycle: d => pickLap((mods.lap - 1 + d + LAP_MAX) % LAP_MAX + 1) },
       { label: "Прицел по букве",
         value: () => mods.aim ? "вкл" : "выкл",
         hint: "Целиться нужно в сам пропуск,<br>а не просто в блок",
@@ -12605,6 +12625,14 @@
     saveMods(); dropBag(); syncHud();
   }
 
+  // Круг правим и в текущей несыгранной партии, чтобы HUD показывал скорость
+  // того круга, с которого игрок собрался стартовать.
+  function pickLap(n) {
+    mods.lap = n;
+    if (state === "ready") lap = n;
+    saveMods(); syncHud();
+  }
+
   function dropKey(e) {
     const n = THEME_OPTIONS.length;
     switch (e.key) {
@@ -12653,7 +12681,7 @@
     tips = TIPS_START; ammo = AMMO_START;
     combo = 0; bestCombo = 0; solved = 0;
     stage = 0; stageSpawned = 0; poolDry = false;
-    lap = 1;
+    lap = mods.lap;
     used.clear(); dropBag();
     spawnTimer = 400;
     shake = 0; flash = 0;
@@ -12661,7 +12689,8 @@
     held.left = held.right = false;
     if (startNow) {
       state = "play";
-      setMsg(STAGES[0].name + "<br>Наведи пушку<br>и печатай букву.");
+      setMsg((lap > 1 ? `КРУГ ${lap}<br>` : "") + STAGES[0].name +
+             "<br>Наведи пушку<br>и печатай букву.");
     } else {
       toMenu();
     }
@@ -12716,14 +12745,7 @@
 
   const rules = () => STAGES[Math.min(stage, STAGES.length - 1)];
 
-  // Победы у забега нет: пройдя все этапы, он начинается заново на LAP_SPEED
-  // быстрее. Скорость выбрана рычагом потому, что она единственная ни во что
-  // не упирается: длина слов кончается на восьми буквах, пропуски на трёх,
-  // бюджет поля — на пятнадцати единицах внимания.
-  // Шаг в 1 px/s был ниже порога различения: блок долетал до линии за 28.6 с
-  // вместо 30.0, и круг 2 не отличался от первого ничем. Пять — видно сразу.
-  const LAP_SPEED = 5;                                  // px/s за круг
-  const speedNow = r => r.speed + (lap - 1) * LAP_SPEED;
+  // Скорость этапа зависит ещё и от круга — см. speedNow и LAP_SPEED выше.
 
   // «8–8 букв» читается как опечатка, поэтому одинаковые границы схлопываем
   const lenLabel = r => r.len[0] === r.len[1] ? String(r.len[0])
@@ -13797,7 +13819,12 @@
     syncLangButtons();
     const wasInMods = state === "ready" && menu.screen === "mods";
     reset();
-    if (wasInMods) { menu.screen = "mods"; menu.index = 1; }
+    // курсор возвращаем на сам пункт «Язык», а не на фиксированный индекс:
+    // список модификаторов растёт, и номер пункта в нём не константа
+    if (wasInMods) {
+      menu.screen = "mods";
+      menu.index = Math.max(0, SCREENS.mods.findIndex(it => it.label === "Язык"));
+    }
   }
 
   for (const btn of document.querySelectorAll(".lang button")) {
