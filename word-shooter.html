@@ -3431,6 +3431,180 @@
       "nn--a---nnnn--nav--a-nnnnnnnnnnn-nn-n--n-nnnnnn-n-n-n--nnnn-----nnnn-na-a-nnn-nnannnnnnn-nnvn-nnv-v-" +
       "n--nnan-nn-nn--annn-n--nn-nn",
   };
+  // Тематические словари. В теме только то, что реально может
+  // выпасть в блоке: слово из корпуса, существительное, не имя.
+  const THEMES = {
+    ru: {
+      // Животные: 123
+      animal:
+        "акула бабочка баран барсук белка бык верблюд волк воробей ворон ворона гнездо голубь горилла гусь " +
+        "дельфин дятел жаба жеребец жираф жук заяц зверь зебра змея индюк кабан карп кенгуру кит клык клюв " +
+        "кобра кобыла коготь коза козел комар конь корова кот котенок кошка краб креветка крокодил кролик " +
+        "крот крыло крыса кузнечик курица лама лебедь лев леопард лис лиса логово лосось лось лошадь лягушка " +
+        "медведь медуза мул муравей муха мышь нора носорог обезьяна овца окунь олень орел оса осел осьминог " +
+        "павлин пантера паук перо пес петух пингвин питон пони попугай птица пчела рак рог рыба сверчок " +
+        "свинья скорпион слон собака сова сокол сорока стадо стая таракан тигр тунец тюлень улитка утка " +
+        "форель хвост хищник хомяк цыпленок чайка червь черепаха шерсть щенок ягуар ястреб ящерица",
+      // Еда: 96
+      food:
+        "апельсин арахис арбуз банан баранина бекон блин блюдо бульон варенье ветчина вино виноград вишня " +
+        "вода водка говядина горох горчица груша десерт джем завтрак закуска зефир изюм икра индейка йогурт " +
+        "какао капуста картошка каша кекс клубника колбаса конфета коньяк кофе крем крошка курица кусок лапша " +
+        "лимон лимонад лук майонез масло мед миндаль молоко морковь мука мясо обед овсянка огурец окорок " +
+        "омлет орех перец персик печенье пиво пирог пирожок помидор порция пряник рис рыба салат сахар " +
+        "свинина сироп сок соль сосиска соус суп сыр тесто торт тыква ужин уксус уха фасоль хлеб чай чеснок " +
+        "шоколад шпинат яблоко яйцо",
+      // Растения: 43
+      plant:
+        "бутон ветвь ветка вишня газон груша дерево дуб елка ель зерно ива кактус клевер кора корень кукуруза " +
+        "куст лен лилия липа лист мак мелисса мох мята нарцисс огород персик плод побег почка пыльца роза сад " +
+        "семя сосна ствол трава урожай цветок шип шишка",
+      // Тело: 72
+      body:
+        "артерия бедро бровь вена вес волос глаз голова голос горло грудь губа дрожь дыхание железа желудок " +
+        "живот жила запястье затылок зуб икра кашель кисть кишка клык кожа колено кость кровь кулак ладонь " +
+        "легкое лицо лоб локоть мозг мышца небо нерв нога ноготь нос палец печень плечо плоть пора пот почка " +
+        "пульс пупок ребро родинка рост рот рука сердце скелет слеза слюна сон спина таз талия тело торс ухо " +
+        "череп шея шрам язык",
+      // Вещи: 107
+      thing:
+        "альбом банка блокнот болт ботинок бочка брюки бумага бутылка ведро вилка винт воротник галстук " +
+        "гвоздь губка диван доска дрель замок зеркало игла карандаш карман кепка кисть ключ книга кнопка " +
+        "ковер комод конверт корзина коробка кошелек краска кресло кровать кружка крюк кувшин куртка лампа " +
+        "ложка лопата марка матрас миска молния молоток мыло насос нить нож ножницы носок обувь одежда одеяло " +
+        "отвертка пальто папка перчатка пила платье поднос подушка полка портфель пояс пуговица ремень " +
+        "рубашка рукав ручка рюкзак салфетка сапог свеча свитер стакан стол стул сумка сундук таз тарелка " +
+        "тетрадь топор тряпка туфля фонарь цепь чайник чашка чемодан чулок шапка шарф швабра шкаф шланг шляпа " +
+        "штаны щетка юбка ящик",
+      // Природа: 87
+      nature:
+        "айсберг берег болото буря бухта ветер вихрь вода водопад воздух волна вулкан глина гора град гроза " +
+        "гром дно дождь дым жара закат залив заря затмение звезда земля зола искра камень каньон комета " +
+        "кратер лава лавина лед лес ливень луна метель метеор молния море мороз мыс небо оазис облако огонь " +
+        "озеро океан остров пепел песок пещера пламя пляж поле порог почва прилив природа приток пролив пруд " +
+        "пустыня радуга рассвет река роса ручей свет скала сквозняк снег солнце стихия тайга тень течение " +
+        "туман туча ураган ущелье холм холод шторм",
+      // Места: 82
+      place:
+        "аптека базар балкон банк баня башня больница бульвар вокзал город дверь двор дворец деревня дом " +
+        "дорога забор завод замок институт карьер кафе киоск кладбище комната коридор крепость крыльцо крыша " +
+        "кухня лавка лестница магазин маяк мельница мост музей окно отель парк пекарня переулок площадь " +
+        "подвал порог порт поселок почта пристань причал проспект рынок сад село сквер собор спальня стадион " +
+        "станция стена столица столовая театр тоннель трасса тропа тротуар тюрьма улица фабрика ферма храм " +
+        "центр церковь цирк часовня чердак чулан шахта школа шоссе этаж",
+      // Время: 65
+      time:
+        "август апрель будущее век весна вечер вечность возраст время вторник год дата декабрь день детство " +
+        "завтра закат заря зима июль июнь конец лето май март месяц миг минута момент начало неделя ночь " +
+        "ноябрь октябрь осень отпуск пауза перерыв период полдень полночь пора праздник прошлое пятница " +
+        "рассвет сегодня сезон секунда сентябрь среда срок старость суббота сумерки сутки утро февраль час " +
+        "четверг эпоха эра юбилей юность январь",
+    },
+    en: {
+      // Животные: 70
+      animal:
+        "ant asp bacteria bat bear bee beef bird buffalo bug bull camel cat cattle cayman charger chick cow " +
+        "cricket das deer dog down duck eagle egg elephant entire female fish fly fox frog giant gnu goat " +
+        "hawk horse human humans jaguar lamb lion male monkey mount mouse mustang penguin pet pig poultry " +
+        "puppy python queen rabbit rat robin salmon shark sheep snake spider tail turkey virus wing wolf worm " +
+        "young",
+      // Еда: 68
+      food:
+        "alcohol apple bacon bean beer berry beverage bread butter candy cheese chicken chips chuck cisco " +
+        "cocktail coffee cookie cuisine diet dietary dinner dressing drink eggs feed flour generic ham hash " +
+        "hay helping herbal honey jam juice lemon lunch marc meal meat milk mix murphy orange pasta pie pizza " +
+        "pork potato produce rice salad sandwich sauce seafood serving soup spirits sub sugar tea tomato " +
+        "treat trout vintage walnut wine",
+      // Растения: 58
+      plant:
+        "annual aquatic arbor banana blade bush cedar cheat cherry chess clocks cod corn crop daisy falls " +
+        "flower fruit fuji garlic glad grass harvest heath heather herb holly hull kernel leaf lotus maple " +
+        "moss myrtle needle nut oak olive onion pepper pine pod reed root rose samba seed shoot simple soma " +
+        "sticker timothy tree trunk vanilla weed wheat willow",
+      // Тело: 72
+      body:
+        "ala arm back behind belly blood body bone brain breast chassis chest colon come costa ear eye face " +
+        "facial finger fist flesh foot gene hair hand head hip hormone imperial insulin joint kidney knee lap " +
+        "lat leg lid lip liver lung mouth muscle nail neck nerve nose organ palm plasma prostate quick " +
+        "receptor serum shoulder skin small socket sperm spine stomach tear teeth throat thumb tissue toe " +
+        "tongue tooth valve vessel wrist",
+      // Вещи: 538
+      thing:
+        "acoustic adaptor addition aircraft airline airplane airport anchor annex antenna apparel aquarium " +
+        "arcade archive armor arms art assembly asylum auto bag ball balloon banner bar barn barrel barrier " +
+        "bars base basement basin basket bath bathroom bbs beads bed bedding bedroom bell belt bench bicycle " +
+        "bike billy bin blanket block boards boat bomb bones bookmark boot booth bottle bouquet boutique bow " +
+        "bowl box bra bracelet brad brake brakes brick bridge briefs buck building bullet bumper burner bus " +
+        "button cab cabin cabinet cache cafe cage cake camera camp can candle cannon canvas cap capitol car " +
+        "card cargo carpet cart casino cassette casting castle ceiling cell central ceramic chains chair " +
+        "chamber chapel circuit classic cleaner cleaners clip clock cloth clothes clothing coat coating " +
+        "collar colors colours combine compact computer condo console cooler cope cord cosmetic costume " +
+        "cottage counter cover cradle cross cup cure cursor dairy dam deck decor depot derby desk detector " +
+        "device diagram dial dice die disc dish dive dock doll door dose dress drill drug drum dryer electric " +
+        "embassy empty engine entrance envelope ethernet exit export fabric facility facing factory fake fan " +
+        "farm fax felt fence ferry filter flag floor flooring floppy footage footwear forge fork fort " +
+        "fountain frame freight fridge gage garage garden gate gateway gather gauge gear gem gig glasses grab " +
+        "graphic grill grocery guitar gun gym hall hammer handle hanging hardware hat haven headset heater " +
+        "heel helmet highway holder hook horn hose hospital hostel hotel house housing hub idol import inn " +
+        "internet intranet ipod jacket jail jar jean jeans jeep jet jewel jewelry jimmy junction key keyboard " +
+        "kirk kit kitchen knife knit knitting lab lace ladder lamp lance landing lane laptop laser launch " +
+        "laundry layer leading lens library limited lingerie links load loading lobby local lock lodging loop " +
+        "lounge lower luggage mac machine magnet makeup mall manor map marina marker mart mask mat match " +
+        "mattress membrane metallic metro mic mill mine mini mirror missile modeling modem motel motor museum " +
+        "necklace net nuke nursery office original outlet output oven overall paint painting palace pale pan " +
+        "panel pants parcel patio pavilion pen pencil pendant phone photo piano pickup picture piece pike " +
+        "pill pillow pin pipe pix pixel plane plant plate platform plug plumbing pocket poker pole pool " +
+        "portable portal pot pottery prison product pub pump purse quarters quilt rack radar rail railroad " +
+        "railway ranch receiver recorder reel release remote replica reset rings road robot rocket rod roof " +
+        "room rooms rope rotary rouge round royal rug safe sail salon satin screen scuba seal seating seats " +
+        "segment sensor settle setup shed shelf shell shelter shield ship shipment shirt shoe shop short " +
+        "shorts shower shuttle silk sink ski skirt sleeve slide snapshot soap sofa softball sole spare specs " +
+        "spoke springer stable stadium stand starter station stays steps stereo stick still stocks stopping " +
+        "store strap street string studio stylus suit surface switch sword system tablet tank tape taxi teddy " +
+        "temple tent terminal terrace textile theater theatre thong thread threads tie tile timer tire " +
+        "tobacco toilet tool toolbox total tower toy tractor train transit trap tray trigger trivia truck tub " +
+        "tube tunnel turtle uniform upper vaccine vault vehicle velvet violin wagon wall wallet ware wash " +
+        "watch ways weapon webcam well wheel window wire wiring wool working works workshop wrap wrapping " +
+        "xerox yacht zoo",
+      // Природа: 118
+      nature:
+        "agent arc bank bay beach binary bolt bond boulder brook bubble canal canyon cape cave chip cliff " +
+        "climb cloud coast col cove covering crack creek current dale dell delta deposit drag draw effect " +
+        "electron elements energy exchange flat flood foam fog fortune gale glen globe grain gravity ground " +
+        "gulf heat highland hill hole ion island isle lake light main mainland maria marsh mere mesa mountain " +
+        "must narrow nest nova ocean opening pit plain planet pond pressure rain rainbow rapid reef remains " +
+        "response result ribbon ridge river rock sea sheet shore sierra sky slope smoke snow spectrum star " +
+        "stone storm strain stream stretch strip sun sunshine thermal track trail universe upgrade valley " +
+        "variable voltage wake weather web wind world",
+      // Места: 97
+      place:
+        "area beat border borough bottom boundary campus cemetery center city clearing common commons corner " +
+        "county crest den desert desktop dig district downtown edge empire end exterior field front frontier " +
+        "habitat harbor harbour heaven heights here holy home homeland hometown horizon inside interior " +
+        "jungle latitude lawn left locale middle oasis open orbit origin outdoors outline outside paradise " +
+        "park parts place plaza polls port position post prairie premises province reach region resort roads " +
+        "rough route scene seat see setting side site source spa spot state surround tee terrain there thick " +
+        "tip top town township tract trend unknown venue zone",
+      // Время: 90
+      time:
+        "aurora autumn birth birthday calendar century close cycle date dawn day days deadline decade deep " +
+        "delay duration dying era even evening fall festival float flush flux full future grave history " +
+        "holiday hour hours instant interim interval last leave leisure lifetime midnight min minute moment " +
+        "month morning mph night none noon now offset old over pace past payday period phase picnic present " +
+        "rate rev rpm season sec second semester span speed spring stage summer sunrise sunset teens then " +
+        "times today tomorrow tonight vacation velocity wait week weekend while winter year years",
+    },
+  };
+  const THEME_NAMES = {
+    animal: "Животные",
+    food: "Еда",
+    plant: "Растения",
+    body: "Тело",
+    thing: "Вещи",
+    nature: "Природа",
+    place: "Места",
+    time: "Время",
+  };
   // >>> WORDLIST END <<<
 
   // CORPUS собирает tools/build-wordlist.mjs: слова по убыванию частотности.
@@ -3458,6 +3632,24 @@
       if (list[i] && !PART[lg].has(list[i])) PART[lg].set(list[i], POS[lg][i]);
   }
   const partOf = w => PART[lang].get(w) || "-";
+
+  // Темы: слово -> список тем, тема -> слова. Данные собраны, но геймплей их
+  // пока не трогает: сюда подключаются тематические паки, а тема сложность не
+  // повышает, а понижает — игрок читает Р_КЕТА, уже зная, что тема «космос».
+  const THEME_OF = { ru: new Map(), en: new Map() };
+  const THEME_POOL = { ru: new Map(), en: new Map() };
+  for (const lg of ["ru", "en"]) {
+    for (const id of Object.keys(THEMES[lg])) {
+      const list = THEMES[lg][id].split(" ").filter(Boolean);
+      THEME_POOL[lg].set(id, list);
+      for (const w of list) {
+        if (!THEME_OF[lg].has(w)) THEME_OF[lg].set(w, []);
+        THEME_OF[lg].get(w).push(id);
+      }
+    }
+  }
+  const themesOf = w => THEME_OF[lang].get(w) || [];
+  const themePool = id => THEME_POOL[lang].get(id) || [];
 
   // Соседи — слова той же длины, отличающиеся не более чем на maxGaps букв.
   // Считаются на лету: корпус на десятки тысяч слов дешевле возить целиком,

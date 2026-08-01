@@ -156,6 +156,98 @@ async function posTags(key, words, src) {
   return words.map(w => tag.get(w) || "-").join("");
 }
 
+// ------------------------------------------------------------------- темы
+// Тема — это обещание: игрок выбрал «еду» и ждёт «хлеб» и «суп», а не «доску».
+// Поэтому источники у двух языков разные и намеренно.
+//
+//   английский — WordNet, но по ГЛАВНОМУ значению слова (первый синсет в
+//                index.noun). Если брать все значения, «table» попадает в еду
+//                (накрытый стол), «python» — в люди, «head» — в животных;
+//   русский    — руками, tools/themes/ru/*.txt. Автоматическая разметка даёт
+//                длинный хвост мусора, который обещание и ломает. Сто отобранных
+//                слов работают лучше восьмисот размеченных.
+//
+// В тему попадает только то, что реально может выпасть в блоке: слово есть в
+// корпусе, помечено существительным и не входит в список незагадываемых.
+const THEME_LIST = [
+  { id: "animal", name: "Животные", lex: ["05"] },
+  { id: "food",   name: "Еда",      lex: ["13"] },
+  { id: "plant",  name: "Растения", lex: ["20"] },
+  { id: "body",   name: "Тело",     lex: ["08"] },
+  { id: "thing",  name: "Вещи",     lex: ["06"] },
+  { id: "nature", name: "Природа",  lex: ["17", "19"] },
+  { id: "place",  name: "Места",    lex: ["15"] },
+  { id: "time",   name: "Время",    lex: ["28"] },
+];
+
+const WN_DATA = { tag: "data", file: "en_data_noun.txt",
+  url: "https://raw.githubusercontent.com/extjwnl/extjwnl-data-wn31/master/src/main/resources/net/sf/extjwnl/data/wordnet/wn31/data.noun" };
+
+// синсет -> категория и формы слов в исходном регистре: заглавная буква
+// выдаёт имя собственное («Alabama», «Aaron»), а такие загадки бессмысленны
+function parseSynsets(text) {
+  const lex = new Map(), forms = new Map();
+  for (const line of text.split(/\r?\n/)) {
+    if (!line || line.startsWith("  ")) continue;
+    const p = line.split(" ");
+    const count = parseInt(p[3], 16);
+    const words = [];
+    for (let i = 0; i < count; i++) words.push(p[4 + i * 2]);
+    lex.set(p[0], p[1]);
+    forms.set(p[0], words);
+  }
+  return { lex, forms };
+}
+
+async function enThemes(allowed) {
+  const { lex, forms } = parseSynsets(await fetchAny("en", WN_DATA));
+  const index = await fetchAny("en", POS_SOURCES.en[0]);
+  const byLex = new Map();
+  for (const line of index.split(/\r?\n/)) {
+    if (!line || line.startsWith("  ")) continue;
+    const p = line.split(" ");
+    const word = p[0];
+    if (!allowed.has(word)) continue;
+    // формат: lemma pos synset_cnt p_cnt [ptr_symbol...] sense_cnt tagsense_cnt offset...
+    const first = p[4 + parseInt(p[3], 10) + 2];
+    const own = (forms.get(first) || []).find(f => f.toLowerCase() === word);
+    if (!own || own[0] !== own[0].toLowerCase()) continue;   // имя собственное
+    const l = lex.get(first);
+    if (!byLex.has(l)) byLex.set(l, new Set());
+    byLex.get(l).add(word);
+  }
+  const out = {};
+  for (const theme of THEME_LIST) {
+    const set = new Set();
+    for (const l of theme.lex) for (const w of byLex.get(l) || []) set.add(w);
+    out[theme.id] = [...set].sort();
+  }
+  return out;
+}
+
+async function ruThemes(allowed, src) {
+  const dir = path.join(ROOT, "tools", "themes", "ru");
+  const out = {}, missed = {};
+  for (const theme of THEME_LIST) {
+    const file = path.join(dir, theme.id + ".txt");
+    const text = await readFile(file, "utf8");
+    const words = text.split(/\r?\n/)
+      .filter(l => !l.trimStart().startsWith("#"))
+      .join(" ").split(/\s+/)
+      .map(w => src.normalize(w.trim().toLowerCase()))
+      .filter(Boolean);
+    const seen = new Set(), keep = [], drop = [];
+    for (const w of words) {
+      if (seen.has(w)) continue;
+      seen.add(w);
+      (allowed.has(w) ? keep : drop).push(w);
+    }
+    out[theme.id] = keep.sort();
+    missed[theme.id] = drop;
+  }
+  return { out, missed };
+}
+
 async function fetchAny(key, source) {
   const cached = path.join(CACHE, source.file);
   if (existsSync(cached)) return readFile(cached, "utf8");
@@ -173,16 +265,18 @@ const START = "  // >>> WORDLIST START <<<";
 const END = "  // >>> WORDLIST END <<<";
 
 // Порядок слов в строке = порядок частотности, по нему игра и считает ранг.
-function wrap(words) {
+function wrap(words, indent = 6, tail = ",") {
+  const pad = " ".repeat(indent);
   const chunks = [];
   let line = "";
   for (const w of words) {
     if (line.length + w.length + 1 > 100) { chunks.push(line); line = ""; }
     line += (line ? " " : "") + w;
   }
+  if (!chunks.length && !line) return `${pad}""${tail}`;
   if (line) chunks.push(line);
   return chunks.map((c, i) =>
-    `      "${c}${i === chunks.length - 1 ? "" : " "}"`).join(" +\n") + ",";
+    `${pad}"${c}${i === chunks.length - 1 ? "" : " "}"`).join(" +\n") + tail;
 }
 
 function renderBlock(data) {
@@ -207,6 +301,23 @@ function renderBlock(data) {
     lines.push(`    ${key}:`);
     lines.push(rows.map(r => `      "${r}"`).join(" +\n") + ",");
   }
+  lines.push("  };");
+  lines.push("  // Тематические словари. В теме только то, что реально может");
+  lines.push("  // выпасть в блоке: слово из корпуса, существительное, не имя.");
+  lines.push("  const THEMES = {");
+  for (const key of ["ru", "en"]) {
+    lines.push(`    ${key}: {`);
+    for (const theme of THEME_LIST) {
+      const words = data[key].themes[theme.id];
+      lines.push(`      // ${theme.name}: ${words.length}`);
+      lines.push(`      ${theme.id}:`);
+      lines.push(wrap(words, 8));
+    }
+    lines.push("    },");
+  }
+  lines.push("  };");
+  lines.push("  const THEME_NAMES = {");
+  lines.push(THEME_LIST.map(t => `    ${t.id}: "${t.name}",`).join("\n"));
   lines.push("  };", END);
   return lines.join("\n");
 }
@@ -219,13 +330,27 @@ for (const key of ["ru", "en"]) {
   const { rank, dropped, noSpawn } = corpus(await fetchList(key), src);
   const words = [...rank.keys()];
   const tags = await posTags(key, words, src);
-  data[key] = { words, noSpawn, tags, url: src.url };
+
+  // в тему пускаем только то, что может выпасть в блоке
+  const skip = new Set(noSpawn);
+  const allowed = new Set(words.filter((w, i) => tags[i] === "n" && !skip.has(w)));
+  let themes, missed = null;
+  if (key === "en") themes = await enThemes(allowed);
+  else ({ out: themes, missed } = await ruThemes(allowed, src));
+
+  data[key] = { words, noSpawn, tags, themes, url: src.url };
 
   const count = t => [...tags].filter(c => c === t).length;
   process.stdout.write(
     `${key}: ${words.length} слов (мат вырезан: ${dropped}, имена не загадываются: ` +
     `${noSpawn.length}) | существительных ${count("n")}, глаголов ${count("v")}, ` +
     `прилагательных ${count("a")}, прочего ${count("-")}\n`);
+  for (const theme of THEME_LIST) {
+    const kept = themes[theme.id].length;
+    const lost = missed ? missed[theme.id] : null;
+    process.stdout.write(`  ${theme.id.padEnd(7)} ${String(kept).padStart(4)}` +
+      (lost?.length ? `   мимо корпуса (${lost.length}): ${lost.slice(0, 12).join(" ")}` : "") + "\n");
+  }
 }
 
 const from = html.indexOf(START);
