@@ -101,11 +101,11 @@
     </div>
   </div>
   <div class="hint">
-    <kbd>Enter</kbd> — начать игру · <b>мышь</b> — наводить пушку (или <kbd>←</kbd> <kbd>→</kbd>)<br>
-    Наведи пушку на блок и напечатай <b>недостающую букву</b> — встанет сама<br>
-    С 7-го уровня целиться нужно уже в <b>сам пропуск</b><br>
-    <b>ЛКМ</b> — подорвать блок на линии огня (1 заряд) ·
-    <kbd>Space</kbd> — снести всё поле (2 заряда)<br>
+    В меню: <kbd>↑</kbd> <kbd>↓</kbd> и <kbd>Enter</kbd> или мышь<br>
+    В игре: <b>мышь</b> наводит пушку (или <kbd>←</kbd> <kbd>→</kbd>),
+    печатай <b>недостающую букву</b> — встанет сама<br>
+    <b>ЛКМ</b> — сбить блок на линии огня (бесплатно, но комбо сгорает) ·
+    <kbd>Space</kbd> — снести всё поле (1 заряд)<br>
     <kbd>Esc</kbd> — пауза
   </div>
 </div>
@@ -403,6 +403,74 @@
   const MAX_SHOTS = 4;
   const SHOT_COOLDOWN = 0.09;    // s
 
+  // ------------------------------------------------------------- модификаторы
+  // Правила, которые выбирает игрок, а не уровень. Хранятся между сессиями.
+  const mods = { aim: false };
+  try { Object.assign(mods, JSON.parse(localStorage.getItem("ws-mods") || "{}")); }
+  catch { /* испорченная запись — играем с настройками по умолчанию */ }
+  const saveMods = () => localStorage.setItem("ws-mods", JSON.stringify(mods));
+
+  // -------------------------------------------------------------------- меню
+  const menu = { screen: "root", index: 0 };
+
+  const SCREENS = {
+    root: [
+      { label: "Начать игру", act: () => reset(true) },
+      { label: "Модификаторы", act: () => { menu.screen = "mods"; menu.index = 0; } },
+    ],
+    mods: [
+      { label: "Прицел по букве",
+        value: () => mods.aim ? "вкл" : "выкл",
+        hint: "Целиться нужно в сам пропуск,<br>а не просто в блок",
+        act: () => { mods.aim = !mods.aim; saveMods(); syncHud(); } },
+      { label: "Язык",
+        value: () => lang.toUpperCase(),
+        hint: "Словарь и раскладка",
+        act: () => { setLang(lang === "ru" ? "en" : "ru"); } },
+      { label: "Назад", act: () => { menu.screen = "root"; menu.index = 0; } },
+    ],
+  };
+
+  const menuItems = () => SCREENS[menu.screen];
+
+  // Прямоугольник пункта — общий для отрисовки и попадания мышью.
+  const MENU_TOP = H / 2 - 40, MENU_STEP = 44, MENU_W = 300;
+  function itemRect(i) {
+    return { x: (W - MENU_W) / 2, y: MENU_TOP + i * MENU_STEP, w: MENU_W, h: 36 };
+  }
+  function itemAt(x, y) {
+    for (let i = 0; i < menuItems().length; i++) {
+      const r = itemRect(i);
+      if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) return i;
+    }
+    return -1;
+  }
+
+  function menuKey(e) {
+    const items = menuItems();
+    switch (e.key) {
+      case "ArrowUp":   menu.index = (menu.index - 1 + items.length) % items.length; break;
+      case "ArrowDown": menu.index = (menu.index + 1) % items.length; break;
+      case "ArrowLeft":
+      case "ArrowRight":
+        if (items[menu.index].value) items[menu.index].act();
+        break;
+      case "Enter":
+      case " ":         items[menu.index].act(); break;
+      case "Escape":
+        if (menu.screen === "mods") { menu.screen = "root"; menu.index = 1; }
+        break;
+      default: return false;
+    }
+    return true;
+  }
+
+  function toMenu() {
+    menu.screen = "root"; menu.index = 0;
+    state = "ready";
+    setMsg("↑ ↓ и ENTER<br>или мышь");
+  }
+
   function reset(startNow) {
     blocks = []; shots = []; sparks = [];
     score = 0; level = 1; lives = 3; bombs = 3;
@@ -411,9 +479,12 @@
     shake = 0; flash = 0;
     cannonX = W / 2; cooldown = 0;
     held.left = held.right = false;
-    state = startNow ? "play" : "ready";
-    setMsg(startNow ? "Наведи пушку<br>и печатай букву."
-                    : "ENTER — старт");
+    if (startNow) {
+      state = "play";
+      setMsg("Наведи пушку<br>и печатай букву.");
+    } else {
+      toMenu();
+    }
     syncHud();
   }
 
@@ -426,16 +497,16 @@
   const LEVELS = [
     // len — длина слова, rank — предел частотности (чем больше, тем реже
     // слово встречается в речи), gaps2 — доля блоков с двумя пропусками,
-    // aim — целиться нужно в саму букву, а не просто в блок,
-    // load — сколько «внимания» помещается на поле разом, см. blockCost
-    { len: [3, 4], rank:  1500, gaps2: 0,    aim: false, speed: 20, load:  5.0 },
-    { len: [3, 5], rank:  1500, gaps2: 0,    aim: false, speed: 21, load:  5.6 },
-    { len: [3, 5], rank:  4000, gaps2: 0,    aim: false, speed: 22, load:  6.2 },
-    { len: [4, 6], rank:  4000, gaps2: 0,    aim: false, speed: 23, load:  6.9 },
-    { len: [4, 6], rank: 10000, gaps2: 0.2,  aim: false, speed: 24, load:  7.6 },
-    { len: [4, 7], rank: 10000, gaps2: 0.35, aim: false, speed: 26, load:  8.3 },
-    { len: [5, 7], rank: 99999, gaps2: 0.5,  aim: true,  speed: 27, load:  9.1 },
-    { len: [5, 8], rank: 99999, gaps2: 0.65, aim: true,  speed: 29, load: 10.0 },
+    // load — сколько «внимания» помещается на поле разом, см. blockCost.
+    // Точный прицел уровнем не управляется: это модификатор из меню.
+    { len: [3, 4], rank:  1500, gaps2: 0,    speed: 20, load:  5.0 },
+    { len: [3, 5], rank:  1500, gaps2: 0,    speed: 21, load:  5.6 },
+    { len: [3, 5], rank:  4000, gaps2: 0,    speed: 22, load:  6.2 },
+    { len: [4, 6], rank:  4000, gaps2: 0,    speed: 23, load:  6.9 },
+    { len: [4, 6], rank: 10000, gaps2: 0.2,  speed: 24, load:  7.6 },
+    { len: [4, 7], rank: 10000, gaps2: 0.35, speed: 26, load:  8.3 },
+    { len: [5, 7], rank: 99999, gaps2: 0.5,  speed: 27, load:  9.1 },
+    { len: [5, 8], rank: 99999, gaps2: 0.65, speed: 29, load: 10.0 },
   ];
 
   // Цена блока в «единицах внимания». Длинное, редкое и дырявое слово
@@ -463,6 +534,9 @@
              speed: last.speed + over * 1.5,
              load: Math.min(14, last.load + over * 0.4) };
   }
+
+  // прицел задаёт игрок в меню, а не уровень
+  function needsAim() { return mods.aim; }
 
   // ------------------------------------------------------------ блоки-слова
   function makeBlock() {
@@ -492,7 +566,7 @@
       rank: info(word).rank,                 // редкость загаданного, не собранного
       // правило наводки запоминаем при появлении: блок, взлетевший при старых
       // правилах, не должен посреди полёта потребовать точного прицела
-      aim: r.aim,
+      aim: needsAim(),
       // все слова, которые ещё могут получиться: из них считаются верные буквы
       options: [word, ...info(word).neighbours],
       w, h: 40,
@@ -602,7 +676,7 @@
   // Подрывы не засчитывают слова и сжигают комбо: это аварийный выход,
   // а не способ набирать очки. Оба берут заряды из общего запаса, но полная
   // зачистка стоит дороже точечного подрыва.
-  const CLEAR_COST = 2;
+  const CLEAR_COST = 1;
 
   // true — подрыв состоялся
   function detonate(victims, cost, what) {
@@ -629,11 +703,12 @@
     return true;
   }
 
-  // клик — точечный подрыв блока на линии огня
+  // Клик — бесплатный снос одного блока: способ отделаться от слова, которое
+  // не поддаётся. Платой служит комбо, поэтому злоупотребление бьёт по очкам.
   function bombOne() {
     const victim = blockInLine();
     if (!victim) { setMsg("На линии огня<br>пусто."); return; }
-    detonate([victim], 1, "Подрыв: слово<br>не засчитано.");
+    detonate([victim], 0, "Сбито: слово<br>не засчитано.");
   }
 
   // пробел — зачистка всего поля вместе с летящими буквами
@@ -858,9 +933,9 @@
 
     drawCannon();
 
-    if (state === "ready") banner("WORD SHOOTER", "ENTER — начать игру");
+    if (state === "ready") drawMenu();
     if (state === "pause") banner("PAUSE", "ESC — продолжить");
-    if (state === "over")  banner("GAME OVER", "ENTER — заново");
+    if (state === "over")  banner("GAME OVER", "ENTER — в меню");
 
     ctx.restore();
   }
@@ -966,6 +1041,53 @@
     }
   }
 
+  function drawMenu() {
+    const items = menuItems();
+    const top = MENU_TOP - 92;
+    const bottom = MENU_TOP + items.length * MENU_STEP + 46;
+
+    ctx.fillStyle = "rgba(158,173,134,.92)";
+    ctx.fillRect(0, top, W, bottom - top);
+    ctx.strokeStyle = INK; ctx.lineWidth = 2;
+    ctx.strokeRect(0, top, W, bottom - top);
+
+    ctx.textAlign = "center";
+    ctx.fillStyle = INK;
+    ctx.font = "bold 30px 'Courier New', monospace";
+    ctx.fillText(menu.screen === "root" ? "WORD SHOOTER" : "МОДИФИКАТОРЫ", W / 2, top + 44);
+
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i], r = itemRect(i), on = i === menu.index;
+      if (on) {
+        ctx.fillStyle = INK;
+        roundRect(r.x, r.y, r.w, r.h, 5);
+        ctx.fill();
+      } else {
+        ctx.strokeStyle = "rgba(43,49,34,.35)";
+        ctx.lineWidth = 1.5;
+        roundRect(r.x, r.y, r.w, r.h, 5);
+        ctx.stroke();
+      }
+      ctx.fillStyle = on ? "#9ead86" : INK;
+      ctx.font = "bold 17px 'Courier New', monospace";
+      ctx.textAlign = "left";
+      ctx.fillText(it.label, r.x + 16, r.y + r.h / 2 + 1);
+      if (it.value) {
+        ctx.textAlign = "right";
+        ctx.fillText(it.value(), r.x + r.w - 16, r.y + r.h / 2 + 1);
+      }
+    }
+
+    // подсказка по выбранному пункту
+    ctx.textAlign = "center";
+    ctx.fillStyle = INK;
+    ctx.font = "12px 'Courier New', monospace";
+    const hint = items[menu.index].hint;
+    const lines = hint ? hint.split("<br>") : ["↑ ↓ — выбор · ENTER — применить"];
+    lines.forEach((line, i) =>
+      ctx.fillText(line, W / 2, MENU_TOP + items.length * MENU_STEP + 14 + i * 15));
+  }
+
   function banner(title, sub) {
     ctx.fillStyle = "rgba(158,173,134,.86)";
     ctx.fillRect(0, H / 2 - 60, W, 120);
@@ -1005,7 +1127,7 @@
                : r.rank <= 10000 ? "+ редкие" : "любые";
     el.rules.innerHTML = `${r.len[0]}–${r.len[1]} букв · ${band}` +
       (r.gaps2 > 0 ? `<br>до 2 пропусков` : "") +
-      (r.aim ? `<br>прицел по букве` : "") +
+      (needsAim() ? `<br>прицел по букве` : "") +
       `<br>бюджет поля ${r.load.toFixed(1)}` +
       `<br>скорость ${Math.round(r.speed)}`;
   }
@@ -1014,6 +1136,12 @@
   document.addEventListener("keydown", e => {
     if (e.ctrlKey || e.altKey || e.metaKey) return;
 
+    // в меню Escape отдан навигации: он возвращает из модификаторов
+    if (state === "ready") {
+      if (menuKey(e)) e.preventDefault();
+      return;
+    }
+
     if (e.key === "Escape") {
       e.preventDefault();
       if (state === "play") { state = "pause"; setMsg("Пауза"); }
@@ -1021,11 +1149,10 @@
       return;
     }
 
-    // со стартового экрана и после конца партии игру начинает любая клавиша
-    if (state === "ready" || state === "over") {
+    if (state === "over") {
       if (e.key === "Enter" || e.key === " " || resolveLetter(e)) {
         e.preventDefault();
-        reset(true);
+        toMenu();
       }
       return;
     }
@@ -1046,17 +1173,34 @@
 
   // Основное управление — мышь: пушка встаёт под курсор мгновенно, без разгона.
   // Стрелки оставлены как запасной вариант и в движении проигрывают мыши.
-  canvas.addEventListener("pointermove", e => {
+  const canvasPos = e => {
     const r = canvas.getBoundingClientRect();
-    const x = (e.clientX - r.left) * (W / r.width);
-    cannonX = Math.max(16, Math.min(W - 16, x));
+    return { x: (e.clientX - r.left) * (W / r.width),
+             y: (e.clientY - r.top) * (H / r.height) };
+  };
+
+  canvas.addEventListener("pointermove", e => {
+    const p = canvasPos(e);
+    if (state === "ready") {                 // в меню мышь водит по пунктам
+      const i = itemAt(p.x, p.y);
+      if (i !== -1) menu.index = i;
+      return;
+    }
+    cannonX = Math.max(16, Math.min(W - 16, p.x));
     held.left = held.right = false;
   });
+
   // ЛКМ — точечный подрыв того блока, что стоит на линии огня
   canvas.addEventListener("pointerdown", e => {
     e.preventDefault();
-    if (state === "ready" || state === "over") reset(true);
-    else if (e.button === 0) bombOne();
+    if (state === "ready") {
+      const p = canvasPos(e);
+      const i = itemAt(p.x, p.y);
+      if (i !== -1) { menu.index = i; menuItems()[i].act(); }
+      return;
+    }
+    if (state === "over") { toMenu(); return; }
+    if (e.button === 0) bombOne();
   });
   canvas.addEventListener("contextmenu", e => e.preventDefault());
   // если вкладка потеряла фокус с зажатой стрелкой, пушка не должна «залипнуть»
@@ -1077,14 +1221,19 @@
     return null;
   }
 
+  // Язык меняется и кнопками в панели, и пунктом меню — путь один на обоих.
+  // Партия при этом сбрасывается: словарь под ней меняется целиком.
+  function setLang(next) {
+    lang = next;
+    localStorage.setItem("ws-lang", lang);
+    syncLangButtons();
+    const wasInMods = state === "ready" && menu.screen === "mods";
+    reset();
+    if (wasInMods) { menu.screen = "mods"; menu.index = 1; }
+  }
+
   for (const btn of document.querySelectorAll(".lang button")) {
-    btn.addEventListener("click", () => {
-      lang = btn.dataset.lang;
-      localStorage.setItem("ws-lang", lang);
-      syncLangButtons();
-      reset();
-      btn.blur();
-    });
+    btn.addEventListener("click", () => { setLang(btn.dataset.lang); btn.blur(); });
   }
   function syncLangButtons() {
     for (const btn of document.querySelectorAll(".lang button")) {
