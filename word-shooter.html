@@ -3724,13 +3724,19 @@
 
   // ------------------------------------------------------------- модификаторы
   // Правила, которые выбирает игрок, а не уровень. Хранятся между сессиями.
-  const mods = { aim: false, verbs: false, adjs: false };
+  const mods = { aim: false, verbs: false, adjs: false, theme: "" };
   try { Object.assign(mods, JSON.parse(localStorage.getItem("ws-mods") || "{}")); }
   catch { /* испорченная запись — играем с настройками по умолчанию */ }
+  if (mods.theme && !THEME_NAMES[mods.theme]) mods.theme = "";   // тема из старой сборки
   const saveMods = () => localStorage.setItem("ws-mods", JSON.stringify(mods));
 
+  // Пустая строка — тема не выбрана, слова берутся из всего корпуса.
+  const THEME_OPTIONS = ["", ...Object.keys(THEME_NAMES)];
+  const themeLabel = id => id ? THEME_NAMES[id] : "все";
+
   // -------------------------------------------------------------------- меню
-  const menu = { screen: "root", index: 0 };
+  // open — открытый выпадающий список, opt — подсвеченный в нём пункт
+  const menu = { screen: "root", index: 0, open: null, opt: 0 };
 
   const SCREENS = {
     root: [
@@ -3750,6 +3756,16 @@
         value: () => mods.adjs ? "вкл" : "выкл",
         hint: "Добавить прилагательные:<br>КРА_НЫЙ, БЫС_РЫЙ",
         act: () => { mods.adjs = !mods.adjs; saveMods(); dropBag(); syncHud(); } },
+      { label: "Тема",
+        value: () => themeLabel(mods.theme),
+        hint: "Слова только из выбранной темы.<br>ENTER — список, ← → — по кругу",
+        act: () => { menu.open = "theme"; menu.opt = THEME_OPTIONS.indexOf(mods.theme); },
+        // список длинный, поэтому стрелки листают его, не открывая
+        cycle: d => {
+          const n = THEME_OPTIONS.length;
+          const at = (THEME_OPTIONS.indexOf(mods.theme) + d + n) % n;
+          pickTheme(THEME_OPTIONS[at]);
+        } },
       { label: "Язык",
         value: () => lang.toUpperCase(),
         hint: "Словарь и раскладка",
@@ -3773,15 +3789,54 @@
     return -1;
   }
 
+  // Выпадающий список: рисуется поверх меню по центру, поэтому геометрия
+  // считается от числа пунктов, а не от того, что под ним.
+  const DROP_STEP = 28, DROP_W = 230;
+  const dropTop = n => H / 2 - (n * DROP_STEP) / 2;
+  function dropRect(i, n) {
+    return { x: (W - DROP_W) / 2, y: dropTop(n) + i * DROP_STEP, w: DROP_W, h: DROP_STEP - 3 };
+  }
+  function dropAt(x, y) {
+    const n = THEME_OPTIONS.length;
+    for (let i = 0; i < n; i++) {
+      const r = dropRect(i, n);
+      if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) return i;
+    }
+    return -1;
+  }
+
+  function pickTheme(id) {
+    mods.theme = id;
+    menu.open = null;
+    saveMods(); dropBag(); syncHud();
+  }
+
+  function dropKey(e) {
+    const n = THEME_OPTIONS.length;
+    switch (e.key) {
+      case "ArrowUp":   menu.opt = (menu.opt - 1 + n) % n; break;
+      case "ArrowDown": menu.opt = (menu.opt + 1) % n; break;
+      case "Enter":
+      case " ":         pickTheme(THEME_OPTIONS[menu.opt]); break;
+      case "Escape":    menu.open = null; break;
+      default: return false;
+    }
+    return true;
+  }
+
   function menuKey(e) {
+    if (menu.open) return dropKey(e);
     const items = menuItems();
     switch (e.key) {
       case "ArrowUp":   menu.index = (menu.index - 1 + items.length) % items.length; break;
       case "ArrowDown": menu.index = (menu.index + 1) % items.length; break;
       case "ArrowLeft":
-      case "ArrowRight":
-        if (items[menu.index].value) items[menu.index].act();
+      case "ArrowRight": {
+        const it = items[menu.index];
+        if (it.cycle) it.cycle(e.key === "ArrowLeft" ? -1 : 1);
+        else if (it.value) it.act();
         break;
+      }
       case "Enter":
       case " ":         items[menu.index].act(); break;
       case "Escape":
@@ -3793,7 +3848,7 @@
   }
 
   function toMenu() {
-    menu.screen = "root"; menu.index = 0;
+    menu.screen = "root"; menu.index = 0; menu.open = null;
     state = "ready";
     setMsg("↑ ↓ и ENTER<br>или мышь");
   }
@@ -3890,6 +3945,9 @@
     if (w.length < r.len[0] || w.length > r.len[1]) return false;
     if (SKIP[lang].has(w)) return false;
     if (!allowedPart(w)) return false;
+    // Тема отменяет отбор по частотности: пул темы и так собран вручную,
+    // а планка редкости выкосила бы из него почти всё.
+    if (mods.theme) return themesOf(w).includes(mods.theme);
     const rank = rankOf(w);
     if (rank > r.rank) return false;
     return CURATED[lang].has(w) || (w.length >= 4 && rank > FUNCTION_WORDS);
@@ -3904,14 +3962,22 @@
 
   const dropBag = () => { bag.key = ""; };   // модификаторы сменились — пул другой
 
+  // Ниже этого порога пул темы уже не режем по длине слова: в «Растениях»
+  // на коротком уровне осталось бы полтора десятка слов, и они пошли бы по кругу.
+  const THEME_MIN = 24;
+
   function refillBag(r) {
-    const key = [lang, r.len.join("-"), r.rank, mods.verbs, mods.adjs].join("|");
+    const key = [lang, r.len.join("-"), r.rank, mods.verbs, mods.adjs, mods.theme].join("|");
     if (bag.key === key && bag.at < bag.words.length) return;
     if (bag.key !== key) {
       bag.key = key;
       bag.words = [];
       for (const list of BY_LEN[lang].values())
         for (const w of list) if (eligible(w, r)) bag.words.push(w);
+      if (mods.theme && bag.words.length < THEME_MIN) {
+        bag.words = themePool(mods.theme)
+          .filter(w => !SKIP[lang].has(w) && allowedPart(w));
+      }
       if (!bag.words.length) bag.words = [...CURATED[lang]];
     }
     for (let i = bag.words.length - 1; i > 0; i--) {   // тасуем
@@ -4571,6 +4637,41 @@
     const lines = hint ? hint.split("<br>") : ["↑ ↓ — выбор · ENTER — применить"];
     lines.forEach((line, i) =>
       ctx.fillText(line, W / 2, MENU_TOP + items.length * MENU_STEP + 14 + i * 15));
+
+    if (menu.open) drawDrop();
+  }
+
+  // Выпадающий список поверх меню: своя подложка, чтобы пункты под ним
+  // не просвечивали и не спорили с подсветкой.
+  function drawDrop() {
+    const n = THEME_OPTIONS.length;
+    const top = dropTop(n) - 10, height = n * DROP_STEP + 20;
+    ctx.fillStyle = "#9ead86";
+    ctx.fillRect((W - DROP_W) / 2 - 10, top, DROP_W + 20, height);
+    ctx.strokeStyle = INK; ctx.lineWidth = 2;
+    ctx.strokeRect((W - DROP_W) / 2 - 10, top, DROP_W + 20, height);
+
+    for (let i = 0; i < n; i++) {
+      const id = THEME_OPTIONS[i], r = dropRect(i, n), on = i === menu.opt;
+      if (on) {
+        ctx.fillStyle = INK;
+        roundRect(r.x, r.y, r.w, r.h, 4);
+        ctx.fill();
+      }
+      ctx.fillStyle = on ? "#9ead86" : INK;
+      ctx.font = "bold 15px 'Courier New', monospace";
+      ctx.textAlign = "left";
+      ctx.fillText(themeLabel(id), r.x + 14, r.y + r.h / 2 + 1);
+      // размер пула: сразу видно, что «Растения» вчетверо беднее «Животных»
+      ctx.textAlign = "right";
+      ctx.font = "13px 'Courier New', monospace";
+      ctx.fillText(id ? String(themePool(id).length) : "—", r.x + r.w - 14, r.y + r.h / 2 + 1);
+      if (id === mods.theme && !on) {
+        ctx.strokeStyle = "rgba(43,49,34,.45)"; ctx.lineWidth = 1.5;
+        roundRect(r.x, r.y, r.w, r.h, 4);
+        ctx.stroke();
+      }
+    }
   }
 
   function banner(title, sub) {
@@ -4610,7 +4711,8 @@
     const r = rules();
     const band = r.rank <= 1500 ? "частые" : r.rank <= 4000 ? "+ реже"
                : r.rank <= 10000 ? "+ редкие" : "любые";
-    el.rules.innerHTML = `${r.len[0]}–${r.len[1]} букв · ${band}` +
+    el.rules.innerHTML = (mods.theme ? `тема: ${THEME_NAMES[mods.theme]}<br>` : "") +
+      `${r.len[0]}–${r.len[1]} букв · ${band}` +
       (r.gaps2 > 0 ? `<br>до 2 пропусков` : "") +
       (needsAim() ? `<br>прицел по букве` : "") +
       `<br>бюджет поля ${r.load.toFixed(1)}` +
@@ -4667,6 +4769,11 @@
   canvas.addEventListener("pointermove", e => {
     const p = canvasPos(e);
     if (state === "ready") {                 // в меню мышь водит по пунктам
+      if (menu.open) {
+        const k = dropAt(p.x, p.y);
+        if (k !== -1) menu.opt = k;
+        return;
+      }
       const i = itemAt(p.x, p.y);
       if (i !== -1) menu.index = i;
       return;
@@ -4680,6 +4787,11 @@
     e.preventDefault();
     if (state === "ready") {
       const p = canvasPos(e);
+      if (menu.open) {                       // клик мимо списка — закрыть
+        const k = dropAt(p.x, p.y);
+        if (k === -1) menu.open = null; else pickTheme(THEME_OPTIONS[k]);
+        return;
+      }
       const i = itemAt(p.x, p.y);
       if (i !== -1) { menu.index = i; menuItems()[i].act(); }
       return;
