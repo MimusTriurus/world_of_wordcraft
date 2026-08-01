@@ -248,6 +248,96 @@ async function ruThemes(allowed, src) {
   return { out, missed };
 }
 
+// ------------------------------------------------------------- толкования
+// Подсказка по правой кнопке. Источники разные, как и у тем:
+//
+//   английский — WordNet, толкование главного значения (первый синсет в
+//                index.noun). По всем значениям «bridge» оказывался карточной
+//                игрой, а «castle» — рокировкой;
+//   русский    — Викисловарь в разборе kaikki, первое значение существительного.
+//
+// Толкование не должно выдавать ответ, поэтому однокоренные слова в нём
+// затираются, а само оно обрезается: длинная справка в подсказку не влезет.
+const GLOSS_MAX = 90;
+const RU_WIKT = { tag: "gloss", file: "ru_wiktionary.jsonl",
+  url: "https://kaikki.org/ruwiktionary/%D0%A0%D1%83%D1%81%D1%81%D0%BA%D0%B8%D0%B9/kaikki.org-dictionary-%D0%A0%D1%83%D1%81%D1%81%D0%BA%D0%B8%D0%B9.jsonl" };
+
+// Однокоренное слово в толковании — это выданный ответ. Считаем однокоренным
+// то, что делит с загаданным достаточно длинное начало.
+function censor(word, text) {
+  const stem = word.slice(0, Math.min(4, word.length));
+  return text.replace(/[\p{L}]+/gu, t => {
+    const low = t.toLowerCase().replace(/ё/g, "е");
+    return low.length >= stem.length && low.startsWith(stem) ? "…" : t;
+  });
+}
+
+function trim(text) {
+  let s = text.replace(/\s+/g, " ").trim();
+  if (s.length <= GLOSS_MAX) return s;
+  s = s.slice(0, GLOSS_MAX);
+  const cut = s.lastIndexOf(" ");
+  return (cut > GLOSS_MAX * 0.6 ? s.slice(0, cut) : s) + "…";
+}
+
+async function enGloss(allowed) {
+  const byOffset = new Map();
+  const data = await fetchAny("en", { tag: "data", file: "en_data_noun.txt",
+    url: "https://raw.githubusercontent.com/extjwnl/extjwnl-data-wn31/master/src/main/resources/net/sf/extjwnl/data/wordnet/wn31/data.noun" });
+  for (const line of data.split(/\r?\n/)) {
+    if (!line || line.startsWith("  ")) continue;
+    const bar = line.indexOf("|");
+    if (bar < 0) continue;
+    byOffset.set(line.split(" ")[0], line.slice(bar + 1));
+  }
+  const out = new Map();
+  const index = await fetchAny("en", POS_SOURCES.en[0]);
+  for (const line of index.split(/\r?\n/)) {
+    if (!line || line.startsWith("  ")) continue;
+    const p = line.split(" ");
+    if (!allowed.has(p[0])) continue;
+    const raw = byOffset.get(p[4 + parseInt(p[3], 10) + 2]);
+    if (!raw) continue;
+    // хвост в кавычках — примеры употребления, для подсказки лишние
+    const def = raw.split(";").filter(part => !part.trim().startsWith('"')).join("; ");
+    const text = trim(censor(p[0], def));
+    if (text) out.set(p[0], text);
+  }
+  return out;
+}
+
+async function ruGloss(allowed, src) {
+  const cached = path.join(CACHE, RU_WIKT.file);
+  if (!existsSync(cached)) {
+    if (useCache) throw new Error(`нет кэша ${cached}, запусти без --cache`);
+    process.stdout.write(`качаю ru/толкования (файл большой): ${RU_WIKT.url}\n`);
+    const res = await fetch(RU_WIKT.url);
+    if (!res.ok) throw new Error(`${RU_WIKT.url} -> HTTP ${res.status}`);
+    await mkdir(CACHE, { recursive: true });
+    const { Readable } = await import("node:stream");
+    const { pipeline } = await import("node:stream/promises");
+    const { createWriteStream } = await import("node:fs");
+    await pipeline(Readable.fromWeb(res.body), createWriteStream(cached));
+  }
+  const { createReadStream } = await import("node:fs");
+  const readline = await import("node:readline");
+  const rl = readline.createInterface({ input: createReadStream(cached), crlfDelay: Infinity });
+  const out = new Map();
+  for await (const line of rl) {
+    if (line.indexOf('"noun"') < 0) continue;
+    let o;
+    try { o = JSON.parse(line); } catch { continue; }
+    if (o.pos !== "noun") continue;
+    const w = src.normalize((o.word || "").toLowerCase());
+    if (!allowed.has(w) || out.has(w)) continue;
+    const sense = (o.senses || []).find(s => s.glosses && s.glosses[0]);
+    if (!sense) continue;
+    const text = trim(censor(w, sense.glosses[0]));
+    if (text) out.set(w, text);
+  }
+  return out;
+}
+
 async function fetchAny(key, source) {
   const cached = path.join(CACHE, source.file);
   if (existsSync(cached)) return readFile(cached, "utf8");
@@ -318,6 +408,15 @@ function renderBlock(data) {
   lines.push("  };");
   lines.push("  const THEME_NAMES = {");
   lines.push(THEME_LIST.map(t => `    ${t.id}: "${t.name}",`).join("\n"));
+  lines.push("  };");
+  lines.push("  // Толкование слова — подсказка по правой кнопке. Однокоренные слова");
+  lines.push("  // в тексте затёрты многоточием, чтобы подсказка не выдавала ответ.");
+  lines.push("  const GLOSS = {");
+  for (const key of ["ru", "en"]) {
+    lines.push(`    ${key}: {`);
+    for (const [w, g] of data[key].gloss) lines.push(`      ${JSON.stringify(w)}: ${JSON.stringify(g)},`);
+    lines.push("    },");
+  }
   lines.push("  };", END);
   return lines.join("\n");
 }
@@ -337,8 +436,9 @@ for (const key of ["ru", "en"]) {
   let themes, missed = null;
   if (key === "en") themes = await enThemes(allowed);
   else ({ out: themes, missed } = await ruThemes(allowed, src));
+  const gloss = key === "en" ? await enGloss(allowed) : await ruGloss(allowed, src);
 
-  data[key] = { words, noSpawn, tags, themes, url: src.url };
+  data[key] = { words, noSpawn, tags, themes, gloss, url: src.url };
 
   const count = t => [...tags].filter(c => c === t).length;
   process.stdout.write(
@@ -351,6 +451,9 @@ for (const key of ["ru", "en"]) {
     process.stdout.write(`  ${theme.id.padEnd(7)} ${String(kept).padStart(4)}` +
       (lost?.length ? `   мимо корпуса (${lost.length}): ${lost.slice(0, 12).join(" ")}` : "") + "\n");
   }
+  const glen = [...gloss.values()].reduce((s, g) => s + g.length, 0);
+  process.stdout.write(`  толкования ${gloss.size}/${allowed.size} ` +
+    `(${(gloss.size / allowed.size * 100).toFixed(0)}%), ${(glen / 1024).toFixed(0)} КБ\n`);
 }
 
 const from = html.indexOf(START);
