@@ -480,17 +480,45 @@
       timer: 0,
     };
     filterOptions(b);
-    // ищем позицию, не налезающую на свежие блоки сверху
-    for (let attempt = 0; attempt < 12; attempt++) {
-      b.x = 10 + Math.random() * (W - 20 - w);
-      const clash = blocks.some(o => o.y < 90 &&
-        b.x < o.x + o.w + 12 && o.x < b.x + b.w + 12);
-      if (!clash) break;
+
+    // Ищем свободную колонку. Если её нет, блок не рождается вовсе: раньше
+    // после двенадцати попыток он всё равно вставал поверх соседа.
+    const spots = [];
+    for (let attempt = 0; attempt < 24; attempt++) {
+      const x = 10 + Math.random() * (W - 20 - w);
+      if (!blocks.some(o => alive(o) && o.y < b.h + 20 && overlapX(x, w, o))) spots.push(x);
     }
+    if (!spots.length) return null;
+    b.x = spots[0];
     return b;
   }
 
-  function spawn() { blocks.push(makeBlock()); }
+  const alive = b => b.state !== "solved" && b.state !== "dead";
+  const overlapX = (x, w, o) => x < o.x + o.w + GAP && o.x < x + w + GAP;
+  const GAP = 8;                          // просвет между блоками, px
+
+  // false — места не нашлось, попробуем чуть позже
+  function spawn() {
+    const b = makeBlock();
+    if (!b) return false;
+    blocks.push(b);
+    return true;
+  }
+
+  // Блоки одного уровня падают с одной скоростью, но после повышения уровня
+  // новые быстрее старых и догоняют их. Догнавший не проваливается сквозь
+  // соседа, а упирается в него сверху.
+  function unstack() {
+    const live = blocks.filter(alive).sort((a, b) => b.y - a.y);   // снизу вверх
+    for (let i = 0; i < live.length; i++) {
+      const b = live[i];
+      for (let j = 0; j < i; j++) {
+        const o = live[j];                                          // тот, что ниже
+        if (!overlapX(b.x, b.w, o)) continue;
+        if (b.y + b.h + GAP > o.y) b.y = o.y - b.h - GAP;
+      }
+    }
+  }
 
   // Оставляем только те слова, что ещё сходятся с открытыми буквами.
   // Загаданное слово в списке всегда, так что верный ответ не потеряется.
@@ -657,13 +685,16 @@
     cannonX = Math.max(16, Math.min(W - 16, cannonX));
 
     spawnTimer -= dt * 1000;
-    if (spawnTimer <= 0) { spawn(); spawnTimer = spawnInterval; }
+    if (spawnTimer <= 0) spawnTimer = spawn() ? spawnInterval : 250;
 
     for (const b of blocks) {
       if (b.state === "solved" || b.state === "dead") { b.timer += dt; continue; }
       if (b.hurt) b.hurt = Math.max(0, b.hurt - dt);
       b.y += b.speed * dt;
-      if (b.y + b.h >= DANGER_Y) loseLife(b);
+    }
+    unstack();
+    for (const b of blocks) {
+      if (alive(b) && b.y + b.h >= DANGER_Y) loseLife(b);
     }
 
     for (let i = shots.length - 1; i >= 0; i--) {
