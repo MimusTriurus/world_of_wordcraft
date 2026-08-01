@@ -93,6 +93,8 @@
       <div class="label">COMBO</div><div class="value small" id="combo">x1</div>
       <div class="label">LIVES</div><div class="value small" id="lives">♥♥♥</div>
       <div class="label">BOMBS</div><div class="value small" id="bombs">◆◆◆</div>
+      <div class="label">ПОДСКАЗКИ</div><div class="value small" id="tips">?????</div>
+      <div class="label">ПАТРОНЫ</div><div class="value small" id="ammo">25</div>
       <div class="msg" id="msg"></div>
       <div class="lang">
         <button data-lang="ru">RU</button>
@@ -106,7 +108,8 @@
     печатай <b>недостающую букву</b> — встанет сама<br>
     <b>ЛКМ</b> — сбить блок на линии огня (бесплатно, но комбо сгорает) ·
     <kbd>Space</kbd> — снести всё поле (1 заряд)<br>
-    <b>ПКМ</b> — толкование слова на линии огня (1 заряд) ·
+    <b>ПКМ</b> — толкование слова на линии огня (1 подсказка)<br>
+    Выстрел тратит патрон, решённое слово возвращает два ·
     <kbd>Esc</kbd> — пауза
   </div>
 </div>
@@ -12459,6 +12462,8 @@
     combo: document.getElementById("combo"),
     lives: document.getElementById("lives"),
     bombs: document.getElementById("bombs"),
+    tips:  document.getElementById("tips"),
+    ammo:  document.getElementById("ammo"),
     rules: document.getElementById("rules"),
     msg:   document.getElementById("msg"),
   };
@@ -12467,6 +12472,7 @@
   let lang = localStorage.getItem("ws-lang") || "ru";
   let blocks, shots, sparks, reveals, hints;
   let score, lives, bombs, combo, bestCombo, solved;
+  let tips, ammo;                     // подсказки и патроны — разные запасы
   let stage, stageSpawned, poolDry;   // номер этапа, сколько он выпустил, кончились ли слова
   let spawnTimer, state, shake, flash;
   const SPAWN_GAP = 600;         // мс между блоками — антизалп
@@ -12477,12 +12483,26 @@
 
   const CANNON_SPEED = 300;      // px/s
   const SHOT_SPEED = 720;        // px/s
-  const MAX_SHOTS = 4;
+  const MAX_SHOTS = 4;           // столько букв одновременно в полёте
   const SHOT_COOLDOWN = 0.09;    // s
+
+  // Патроны. Начальный запас нужен на разгон, дальше боезапас держится
+  // точностью: решённое слово возвращает больше, чем стоило, а промахи
+  // проедают запас. Блок, ушедший с поля неразгаданным, тоже даёт патрон —
+  // иначе кончившиеся патроны стали бы тупиком, из которого не выбраться.
+  const AMMO_START = 25;
+  const AMMO_SOLVE = 2;
+  const AMMO_LOST = 1;
+  const AMMO_CAP = 40;
+
+  // Подсказки — отдельный запас на забег, с бомбами не связан и не
+  // восполняется: каждая трата должна быть решением.
+  const TIPS_START = 5;
 
   // ------------------------------------------------------------- модификаторы
   // Правила, которые выбирает игрок, а не уровень. Хранятся между сессиями.
-  const mods = { aim: false, verbs: false, adjs: false, theme: "" };
+  const mods = { aim: false, verbs: false, adjs: false, theme: "",
+                 freeTips: false, freeAmmo: false };
   try { Object.assign(mods, JSON.parse(localStorage.getItem("ws-mods") || "{}")); }
   catch { /* испорченная запись — играем с настройками по умолчанию */ }
   if (mods.theme && !THEME_NAMES[mods.theme]) mods.theme = "";   // тема из старой сборки
@@ -12514,6 +12534,14 @@
         value: () => mods.adjs ? "вкл" : "выкл",
         hint: "Добавить прилагательные:<br>КРА_НЫЙ, БЫС_РЫЙ",
         act: () => { mods.adjs = !mods.adjs; saveMods(); dropBag(); syncHud(); } },
+      { label: "Бесконечные подсказки",
+        value: () => mods.freeTips ? "вкл" : "выкл",
+        hint: "ПКМ показывает толкование<br>без траты запаса",
+        act: () => { mods.freeTips = !mods.freeTips; saveMods(); syncHud(); } },
+      { label: "Бесконечные патроны",
+        value: () => mods.freeAmmo ? "вкл" : "выкл",
+        hint: "Стрелять можно сколько угодно,<br>промахи ничего не стоят",
+        act: () => { mods.freeAmmo = !mods.freeAmmo; saveMods(); syncHud(); } },
       { label: "Тема",
         value: () => themeLabel(mods.theme),
         hint: "Слова только из выбранной темы.<br>ENTER — список, ← → — по кругу",
@@ -12535,9 +12563,16 @@
   const menuItems = () => SCREENS[menu.screen];
 
   // Прямоугольник пункта — общий для отрисовки и попадания мышью.
-  const MENU_TOP = H / 2 - 40, MENU_STEP = 44, MENU_W = 300;
+  const MENU_STEP = 44, MENU_W = 300;
+  const MENU_HEAD = 92, MENU_FOOT = 46;   // место под заголовок и подсказку
+  // Экран модификаторов вырос до восьми пунктов, поэтому раскладка считается
+  // от их числа, а не от середины холста: иначе список уезжает за нижний край.
+  function menuTop() {
+    const body = MENU_HEAD + menuItems().length * MENU_STEP + MENU_FOOT;
+    return Math.max(MENU_HEAD + 6, (H - body) / 2 + MENU_HEAD);
+  }
   function itemRect(i) {
-    return { x: (W - MENU_W) / 2, y: MENU_TOP + i * MENU_STEP, w: MENU_W, h: 36 };
+    return { x: (W - MENU_W) / 2, y: menuTop() + i * MENU_STEP, w: MENU_W, h: 36 };
   }
   function itemAt(x, y) {
     for (let i = 0; i < menuItems().length; i++) {
@@ -12614,6 +12649,7 @@
   function reset(startNow) {
     blocks = []; shots = []; sparks = []; reveals = []; hints = [];
     score = 0; lives = 3; bombs = 3;
+    tips = TIPS_START; ammo = AMMO_START;
     combo = 0; bestCombo = 0; solved = 0;
     stage = 0; stageSpawned = 0; poolDry = false;
     used.clear(); dropBag();
@@ -12911,10 +12947,22 @@
   function shootLetter(letter) {
     if (state !== "play") return;
     if (cooldown > 0 || shots.length >= MAX_SHOTS) return;
+    if (!mods.freeAmmo) {
+      if (ammo <= 0) { setMsg("Патроны кончились!<br>Сбивай блоки — вернут."); shake = 5; return; }
+      ammo--;
+    }
 
     cooldown = SHOT_COOLDOWN;
     lastKey = letter; lastKeyAt = performance.now(); lastKeyOk = null;
     shots.push({ letter, x: cannonX, y: CANNON_Y - 14 });
+    syncHud();
+  }
+
+  // Патроны возвращаются, когда блок покидает поле. Решённое слово даёт
+  // больше, чем стоило, — точность и есть источник боезапаса.
+  function refund(n) {
+    if (mods.freeAmmo) return;
+    ammo = Math.min(AMMO_CAP, ammo + n);
   }
 
   // Первый блок, в который упрётся выстрел из текущей позиции пушки.
@@ -12951,6 +12999,7 @@
       burst(b, wide ? 18 : 26);
       b.state = "dead";
       b.timer = 0;
+      refund(AMMO_LOST);
     }
     shake = wide ? 18 : 9;
     flash = wide ? 1 : 0;
@@ -12972,12 +13021,15 @@
   // Появляется сразу непрозрачной и держится, пока слово читается,
   // потом плавно гаснет. Общее время короткое: карточка не должна мешать.
   // ------------------------------------------------------------- подсказка
-  // Правая кнопка показывает толкование слова. Стоит заряда — того же, что
-  // и зачистка поля: это костыль для знания, и он должен конкурировать
-  // с бомбой за один и тот же дефицитный ресурс.
-  const HINT_COST = 1;
-  const HINT_TIME = 5;
-  const HINT_FADE = 0.7;
+  // Правая кнопка показывает толкование слова. Тратит подсказку — свой запас,
+  // не связанный с зарядами: подсказка выручает знание, бомба выручает от
+  // давления на поле, и смешивать их в один кошелёк незачем.
+  const HINT_COST = 1;           // из запаса подсказок, не из зарядов
+  // Время жизни считается по числу строк: короткому толкованию незачем висеть
+  // столько же, сколько длинному, а карточка загораживает поле.
+  const HINT_BASE = 0.9;         // с
+  const HINT_PER_LINE = 0.7;     // с на строку
+  const HINT_FADE = 0.45;        // с — гаснет в самом конце
   const HINT_W = 260;
   const glossOf = w => GLOSS[lang][w] || "";
 
@@ -12989,11 +13041,14 @@
     if (hints.some(h => h.block === b)) return;          // уже висит
     const text = glossOf(b.word);
     if (!text) { setMsg("Толкования нет<br>для этого слова."); shake = 4; return; }
-    if (bombs < HINT_COST) { setMsg("Заряды кончились!"); shake = 4; return; }
+    if (!mods.freeTips && tips < HINT_COST) {
+      setMsg("Подсказки кончились!"); shake = 4; return;
+    }
 
-    bombs -= HINT_COST;
-    hints.push({ block: b, lines: wrapText(text, HINT_W - 20), t: HINT_TIME });
-    setMsg("Подсказка:<br>−" + HINT_COST + " заряд");
+    if (!mods.freeTips) tips -= HINT_COST;
+    const lines = wrapText(text, HINT_W - 20);
+    hints.push({ block: b, lines, t: HINT_BASE + lines.length * HINT_PER_LINE });
+    setMsg(mods.freeTips ? "Подсказка" : "Подсказка:<br>осталось " + tips);
     syncHud();
   }
 
@@ -13058,6 +13113,7 @@
     b.state = "solved";
     b.timer = 0;
     burst(b, 14);
+    refund(AMMO_SOLVE);
     if (solved % 10 === 0 && bombs < 5) { bombs++; setMsg("+1 заряд"); }
     syncHud();
   }
@@ -13134,6 +13190,7 @@
   function loseLife(b) {
     b.state = "dead"; b.timer = 0;
     burst(b, 30);
+    refund(AMMO_LOST);
     lives--; combo = 0; shake = 16;
     if (lives <= 0) {
       state = "over";
@@ -13481,8 +13538,8 @@
 
   function drawMenu() {
     const items = menuItems();
-    const top = MENU_TOP - 92;
-    const bottom = MENU_TOP + items.length * MENU_STEP + 46;
+    const top = menuTop() - MENU_HEAD;
+    const bottom = menuTop() + items.length * MENU_STEP + MENU_FOOT;
 
     ctx.fillStyle = "rgba(158,173,134,.92)";
     ctx.fillRect(0, top, W, bottom - top);
@@ -13523,7 +13580,7 @@
     const hint = items[menu.index].hint;
     const lines = hint ? hint.split("<br>") : ["↑ ↓ — выбор · ENTER — применить"];
     lines.forEach((line, i) =>
-      ctx.fillText(line, W / 2, MENU_TOP + items.length * MENU_STEP + 14 + i * 15));
+      ctx.fillText(line, W / 2, menuTop() + items.length * MENU_STEP + 14 + i * 15));
 
     if (menu.open) drawDrop();
   }
@@ -13593,6 +13650,8 @@
                            (combo > 1 ? " (" + combo + ")" : "");
     el.lives.textContent = "♥".repeat(Math.max(0, lives)) || "—";
     el.bombs.textContent = "◆".repeat(bombs) || "—";
+    el.tips.textContent = mods.freeTips ? "∞" : ("?".repeat(tips) || "—");
+    el.ammo.textContent = mods.freeAmmo ? "∞" : String(ammo);
 
     // из чего сейчас складывается сложность
     const r = rules();
