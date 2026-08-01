@@ -104,7 +104,9 @@
     <kbd>Enter</kbd> — начать игру · <b>мышь</b> — наводить пушку (или <kbd>←</kbd> <kbd>→</kbd>)<br>
     Наведи пушку на блок и напечатай <b>недостающую букву</b> — встанет сама<br>
     С 7-го уровня целиться нужно уже в <b>сам пропуск</b><br>
-    <b>клик</b> или <kbd>Space</kbd> — подрыв блока на линии огня · <kbd>Esc</kbd> пауза
+    <b>ЛКМ</b> — подорвать блок на линии огня (1 заряд) ·
+    <kbd>Space</kbd> — снести всё поле (2 заряда)<br>
+    <kbd>Esc</kbd> — пауза
   </div>
 </div>
 
@@ -575,19 +577,49 @@
     return hit;
   }
 
-  function bomb() {
-    if (state !== "play") return;
-    if (bombs <= 0) { setMsg("Заряды кончились!"); shake = 4; return; }
+  // Подрывы не засчитывают слова и сжигают комбо: это аварийный выход,
+  // а не способ набирать очки. Оба берут заряды из общего запаса, но полная
+  // зачистка стоит дороже точечного подрыва.
+  const CLEAR_COST = 2;
+
+  // true — подрыв состоялся
+  function detonate(victims, cost, what) {
+    if (state !== "play") return false;
+    if (bombs < cost) {
+      setMsg(bombs ? "Нужно зарядов: " + cost : "Заряды кончились!");
+      shake = 4;
+      return false;
+    }
+    if (!victims.length) { setMsg("Поле и так<br>пустое."); return false; }
+
+    const wide = victims.length > 1;
+    bombs -= cost;
+    combo = 0;
+    for (const b of victims) {
+      burst(b, wide ? 18 : 26);
+      b.state = "dead";
+      b.timer = 0;
+    }
+    shake = wide ? 18 : 9;
+    flash = wide ? 1 : 0;
+    setMsg(what);
+    syncHud();
+    return true;
+  }
+
+  // клик — точечный подрыв блока на линии огня
+  function bombOne() {
     const victim = blockInLine();
     if (!victim) { setMsg("На линии огня<br>пусто."); return; }
-    bombs--;
-    combo = 0;                            // подрыв не считается за решение
-    burst(victim, 26);
-    victim.state = "dead";
-    victim.timer = 0;
-    shake = 9;
-    setMsg("Подрыв: слово<br>не засчитано.");
-    syncHud();
+    detonate([victim], 1, "Подрыв: слово<br>не засчитано.");
+  }
+
+  // пробел — зачистка всего поля вместе с летящими буквами
+  function bombAll() {
+    const victims = blocks.filter(alive);
+    if (detonate(victims, CLEAR_COST, "Зачистка: снесено<br>слов — " + victims.length)) {
+      shots.length = 0;
+    }
   }
 
   // Буква попала в пропуск и подошла. Слово с двумя пропусками так
@@ -977,7 +1009,7 @@
     if (e.key === "ArrowLeft")  { e.preventDefault(); held.left = true;  return; }
     if (e.key === "ArrowRight") { e.preventDefault(); held.right = true; return; }
     if (e.key === "Enter") { e.preventDefault(); reset(true); return; }
-    if (e.key === " ") { e.preventDefault(); bomb(); return; }
+    if (e.key === " ") { e.preventDefault(); bombAll(); return; }
 
     const letter = resolveLetter(e);
     if (letter) { e.preventDefault(); shootLetter(letter); }
@@ -996,11 +1028,11 @@
     cannonX = Math.max(16, Math.min(W - 16, x));
     held.left = held.right = false;
   });
-  // клик — подрыв блока на линии огня, чтобы не тянуться к пробелу
+  // ЛКМ — точечный подрыв того блока, что стоит на линии огня
   canvas.addEventListener("pointerdown", e => {
     e.preventDefault();
     if (state === "ready" || state === "over") reset(true);
-    else bomb();
+    else if (e.button === 0) bombOne();
   });
   canvas.addEventListener("contextmenu", e => e.preventDefault());
   // если вкладка потеряла фокус с зажатой стрелкой, пушка не должна «залипнуть»
