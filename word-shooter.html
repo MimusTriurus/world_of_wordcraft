@@ -38,7 +38,7 @@
     display: flex;
     gap: 8px;
   }
-  canvas { display: block; border-radius: 2px; }
+  canvas { display: block; border-radius: 2px; cursor: crosshair; touch-action: none; }
   .hud {
     width: 112px;
     font-size: 12px;
@@ -99,9 +99,9 @@
     </div>
   </div>
   <div class="hint">
-    <kbd>Enter</kbd> — начать игру<br>
-    Печатай <b>недостающую букву</b> — выстрел уйдёт в нижний подходящий блок<br>
-    <kbd>Space</kbd> подрыв блока · <kbd>Esc</kbd> пауза · <kbd>Enter</kbd> заново
+    <kbd>Enter</kbd> — начать игру · <b>мышь</b> — наводить пушку (или <kbd>←</kbd> <kbd>→</kbd>)<br>
+    Подведи пушку под блок и напечатай <b>недостающую букву</b><br>
+    <b>клик</b> или <kbd>Space</kbd> — подрыв блока на линии огня · <kbd>Esc</kbd> пауза
   </div>
 </div>
 
@@ -128,9 +128,50 @@
          "castle dragon knight planet rocket bridge window flower silver " +
          "winter summer spring autumn market school letter number").split(" "),
   };
+  // Слова, которые в блоках не появляются, но засчитываются как верный ответ.
+  // Нужны, чтобы не наказывать за честную альтернативу: Л_С — это и ЛЕС, и ЛИС.
+  const EXTRA = {
+    ru: ("бак бал бар бас бег бок бор бот бук бык вал вар век вес вид вол выл " +
+         "гам гол гул дар дед дым дар дуб дух душ жар жир зал зов зуб кит кол " +
+         "ком кон кум лад лак лев лис лоб лом луг люк маг мак мал мел мех мир " +
+         "мор мох муж мыс нас нос пар пас пат пик пир пол пот пух пыл рак рис " +
+         "рог род рок рот ряд сан сок сор сук сыр сыч так там тик ток том тон " +
+         "тук тур тыл фон хор цех час чан шаг шар шум щит эхо " +
+         "вода мода сода коса роса роза коза лоза лиса липа лапа лупа сова " +
+         "сила сало село дело тело мыло сено окно поле воля доля боль соль " +
+         "моль роль пыль даль дичь ночь дочь речь печь мышь рожь ложь " +
+         "рука мука лужа нога дуга губа гриб краб").split(" "),
+    en: ("bat bad bag ban bar bay bed bee beg bet bid big bin bit bog bow boy " +
+         "bud bug bun bus but cap cot cow cub cue cut dam day den did die dig " +
+         "dim din dip don dot dry dub dug dye ear eat eel elf elk elm end era " +
+         "eye fan far fat fed fee few fig fin fit fix fly foe fog for fry fun " +
+         "fur gap gas gem get gin gum gun gut guy had ham has hat hay hen her " +
+         "hid him hip his hit hoe hog hop hot how hub hue hug hum hut ice ill " +
+         "ink inn ion its ivy jam jar jaw jet job jog joy jug keg kid kin kit " +
+         "lab lad lag lap law lay led leg let lid lie lip lit lob log lot low " +
+         "mad man map mat may men met mid mix mob mop mud mug nap net new nod " +
+         "nor not now nun nut oak oar oat odd ode oil old one orb ore our out " +
+         "owe own pad pan par pat paw pay pea peg pen pet pie pin pit pod pot " +
+         "pub pun pup put rag ram ran rap rat raw ray rib rid rig rim rip rob " +
+         "rod rot row rub rug rum rut sad sag sap sat saw say set sew she shy " +
+         "sin sip sir sit six ski sly sob sod son sow soy spy sub sue sum tab " +
+         "tag tan tap tar tax tea ten the tie tin tip toe ton too top tow toy " +
+         "try tub tug two urn use van vat vet vow war was wax way web wed wet " +
+         "who why wig win wit woe wok won you zip zoo " +
+         "bake cake lake make rake take wake bare care dare fare hare mare " +
+         "bean bear beat heat meat neat seat best rest test nest west pest " +
+         "bell cell fell sell tell well yell bill fill hill kill mill pill " +
+         "band hand land bind find kind mind bond fond pond bang gang hang " +
+         "rang sang ring sing wing bark dark lark mark park cart cast fast " +
+         "last mast past coat goat boat bolt colt gate late mate rate gale " +
+         "male pale sale tale tame fame game name same wine dine fine line " +
+         "mine nine vine hope rope cope note vote hole mole pole role sole " +
+         "back hack lack pack rack sack tack deck neck peck dock lock mock " +
+         "rock sock duck luck muck puck tuck").split(" "),
+  };
   const DICT = {
-    ru: new Set(WORDS.ru),
-    en: new Set(WORDS.en),
+    ru: new Set([...WORDS.ru, ...EXTRA.ru]),
+    en: new Set([...WORDS.en, ...EXTRA.en]),
   };
   const ALPHABET = {
     ru: "абвгдежзийклмнопрстуфхцчшщъыьэюя",
@@ -173,17 +214,26 @@
   let lang = localStorage.getItem("ws-lang") || "ru";
   let blocks, shots, sparks;
   let score, level, lives, bombs, combo, bestCombo, solved;
-  let spawnTimer, spawnInterval, state, shake, flash, cannonAngle;
+  let spawnTimer, spawnInterval, state, shake, flash;
+  let cannonX, cooldown;
   let lastKey = null, lastKeyOk = false, lastKeyAt = 0;
+  const held = { left: false, right: false };
+
+  const CANNON_SPEED = 300;      // px/s
+  const SHOT_SPEED = 720;        // px/s
+  const MAX_SHOTS = 4;
+  const SHOT_COOLDOWN = 0.09;    // s
 
   function reset(startNow) {
     blocks = []; shots = []; sparks = [];
     score = 0; level = 1; lives = 3; bombs = 3;
     combo = 0; bestCombo = 0; solved = 0;
     spawnInterval = 2400; spawnTimer = 600;
-    shake = 0; flash = 0; cannonAngle = -Math.PI / 2;
+    shake = 0; flash = 0;
+    cannonX = W / 2; cooldown = 0;
+    held.left = held.right = false;
     state = startNow ? "play" : "ready";
-    setMsg(startNow ? "Слово с пропуском.<br>Напечатай букву."
+    setMsg(startNow ? "Наведи пушку<br>и печатай букву."
                     : "ENTER — старт");
     syncHud();
   }
@@ -228,50 +278,34 @@
   function spawn() { blocks.push(makeBlock()); }
 
   // ----------------------------------------------------------------- стрельба
+  // Наводки нет: буква уходит строго вверх из текущей позиции пушки
+  // и достаётся первому блоку на линии огня — подходит она ему или нет.
   function shootLetter(letter) {
     if (state !== "play") return;
+    if (cooldown > 0 || shots.length >= MAX_SHOTS) return;
 
-    // цель — самый нижний блок, которому буква подходит
-    let target = null;
-    for (const b of blocks) {
-      if (b.state !== "live" || !b.accepts.has(letter)) continue;
-      if (!target || b.y > target.y) target = b;
-    }
-
-    lastKey = letter; lastKeyAt = performance.now();
-
-    if (!target) {                       // промах — комбо в ноль
-      lastKeyOk = false;
-      combo = 0;
-      shake = Math.max(shake, 5);
-      syncHud();
-      return;
-    }
-
-    lastKeyOk = true;
-    target.state = "locked";             // не даём двум пулям лететь в одно слово
-    aimAt(target);
-    shots.push({
-      letter, target,
-      x: W / 2, y: CANNON_Y - 10,
-      speed: 780,
-    });
+    cooldown = SHOT_COOLDOWN;
+    lastKey = letter; lastKeyAt = performance.now(); lastKeyOk = null;
+    shots.push({ letter, x: cannonX, y: CANNON_Y - 14 });
   }
 
-  function aimAt(b) {
-    cannonAngle = Math.atan2((b.y + b.h / 2) - CANNON_Y, (b.x + b.w / 2) - W / 2);
+  // Первый блок, в который упрётся выстрел из текущей позиции пушки.
+  function blockInLine() {
+    let hit = null;
+    for (const b of blocks) {
+      if (b.state === "solved" || b.state === "dead") continue;
+      if (cannonX < b.x || cannonX > b.x + b.w) continue;
+      if (b.y + b.h > CANNON_Y) continue;
+      if (!hit || b.y > hit.y) hit = b;         // самый нижний по линии
+    }
+    return hit;
   }
 
   function bomb() {
     if (state !== "play") return;
     if (bombs <= 0) { setMsg("Заряды кончились!"); shake = 4; return; }
-    // ближайший к дну живой блок
-    let victim = null;
-    for (const b of blocks) {
-      if (b.state === "dead") continue;
-      if (!victim || b.y > victim.y) victim = b;
-    }
-    if (!victim) return;
+    const victim = blockInLine();
+    if (!victim) { setMsg("На линии огня<br>пусто."); return; }
     bombs--;
     combo = 0;                            // подрыв не считается за решение
     burst(victim, 26);
@@ -282,7 +316,10 @@
     syncHud();
   }
 
-  function solve(b) {
+  function solve(b, letter) {
+    // показываем слово именно с той буквой, которой в него попали
+    if (letter) b.word = b.word.slice(0, b.gap) + letter + b.word.slice(b.gap + 1);
+    lastKeyOk = true;
     combo++;
     bestCombo = Math.max(bestCombo, combo);
     solved++;
@@ -293,6 +330,21 @@
     burst(b, 14);
     if (solved % 8 === 0) levelUp();
     if (solved % 10 === 0 && bombs < 5) { bombs++; setMsg("+1 заряд"); }
+    syncHud();
+  }
+
+  // буква прилетела в блок, которому она не подходит
+  function miss(b) {
+    lastKeyOk = false;
+    combo = 0;
+    shake = Math.max(shake, 7);
+    // показываем шаблон, а не загаданное слово — иначе промах выдаёт ответ
+    if (b) {
+      b.hurt = 0.35;
+      const mask = b.word.split("")
+        .map((ch, i) => i === b.gap ? "_" : ch.toUpperCase()).join("");
+      setMsg("Не подходит:<br>" + mask);
+    }
     syncHud();
   }
 
@@ -329,31 +381,52 @@
   function update(dt) {
     if (state !== "play") { decay(dt); return; }
 
+    cooldown = Math.max(0, cooldown - dt);
+
+    if (held.left)  cannonX -= CANNON_SPEED * dt;
+    if (held.right) cannonX += CANNON_SPEED * dt;
+    cannonX = Math.max(16, Math.min(W - 16, cannonX));
+
     spawnTimer -= dt * 1000;
     if (spawnTimer <= 0) { spawn(); spawnTimer = spawnInterval; }
 
     for (const b of blocks) {
       if (b.state === "solved" || b.state === "dead") { b.timer += dt; continue; }
+      if (b.hurt) b.hurt = Math.max(0, b.hurt - dt);
       b.y += b.speed * dt;
       if (b.y + b.h >= DANGER_Y) loseLife(b);
     }
 
     for (let i = shots.length - 1; i >= 0; i--) {
-      const s = shots[i];
-      const t = s.target;
-      if (t.state === "solved" || t.state === "dead") { shots.splice(i, 1); continue; }
-      const tx = t.x + t.w / 2, ty = t.y + t.h / 2;
-      const dx = tx - s.x, dy = ty - s.y;
-      const d = Math.hypot(dx, dy);
-      if (d < 14) { solve(t); shots.splice(i, 1); continue; }
-      const step = Math.min(s.speed * dt, d);
-      s.x += dx / d * step; s.y += dy / d * step;
+      if (flyShot(shots[i], dt)) shots.splice(i, 1);
     }
 
     blocks = blocks.filter(b =>
       (b.state !== "solved" && b.state !== "dead") || b.timer < 0.45);
 
     decay(dt);
+  }
+
+  // Полёт вверх мелкими шагами, чтобы быстрый снаряд не проскочил сквозь блок.
+  // Возвращает true, если снаряд отработал и его пора убрать.
+  function flyShot(s, dt) {
+    let left = SHOT_SPEED * dt;
+    while (left > 0) {
+      const step = Math.min(left, 8);
+      s.y -= step; left -= step;
+
+      for (const b of blocks) {
+        if (b.state === "solved" || b.state === "dead") continue;
+        if (s.x < b.x || s.x > b.x + b.w) continue;
+        if (s.y > b.y + b.h || s.y < b.y) continue;
+        if (b.accepts.has(s.letter)) solve(b, s.letter);
+        else miss(b);
+        return true;
+      }
+
+      if (s.y < -20) { miss(null); return true; }   // ушёл в молоко
+    }
+    return false;
   }
 
   function decay(dt) {
@@ -398,14 +471,22 @@
     ctx.beginPath(); ctx.moveTo(0, DANGER_Y); ctx.lineTo(W, DANGER_Y); ctx.stroke();
     ctx.setLineDash([]);
 
-    // самый нижний живой блок подсвечиваем как приоритетную цель
-    let lowest = null;
-    for (const b of blocks) {
-      if (b.state === "solved" || b.state === "dead") continue;
-      if (!lowest || b.y > lowest.y) lowest = b;
+    // блок на линии огня — по нему и прилетит следующая буква
+    const aimed = state === "play" || state === "pause" ? blockInLine() : null;
+
+    // сама линия огня
+    if (state === "play" || state === "pause") {
+      ctx.setLineDash([3, 7]);
+      ctx.strokeStyle = "rgba(43,49,34,.35)";
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(cannonX, CANNON_Y - 16);
+      ctx.lineTo(cannonX, aimed ? aimed.y + aimed.h : 0);
+      ctx.stroke();
+      ctx.setLineDash([]);
     }
 
-    for (const b of blocks) drawBlock(b, b === lowest);
+    for (const b of blocks) drawBlock(b, b === aimed);
     for (const s of shots) drawShot(s);
     for (const p of sparks) {
       ctx.globalAlpha = Math.max(0, p.life);
@@ -437,8 +518,10 @@
       ctx.translate(-(b.x + b.w / 2), -(b.y + b.h / 2));
     }
 
-    // корпус
-    ctx.fillStyle = solvedNow ? INK : "rgba(43,49,34,.10)";
+    // корпус; hurt — вспышка от буквы, которая блоку не подошла
+    ctx.fillStyle = solvedNow ? INK
+                  : b.hurt ? "rgba(43,49,34,.45)"
+                  : "rgba(43,49,34,.10)";
     roundRect(b.x, b.y, b.w, b.h, 6);
     ctx.fill();
     ctx.lineWidth = isTarget && !solvedNow && !dead ? 3 : 1.5;
@@ -484,29 +567,29 @@
 
   function drawCannon() {
     ctx.save();
-    ctx.translate(W / 2, CANNON_Y);
+    ctx.translate(cannonX, CANNON_Y);
     ctx.strokeStyle = INK;
     ctx.fillStyle = INK;
     ctx.lineWidth = 6;
-    ctx.beginPath();
+    ctx.beginPath();                 // ствол всегда строго вверх
     ctx.moveTo(0, 0);
-    ctx.lineTo(Math.cos(cannonAngle) * 26, Math.sin(cannonAngle) * 26);
+    ctx.lineTo(0, -26);
     ctx.stroke();
     ctx.beginPath();
     ctx.arc(0, 0, 13, 0, Math.PI * 2);
     ctx.fill();
+    // лафет
+    ctx.fillRect(-20, 6, 40, 8);
     ctx.restore();
 
-    // последняя нажатая клавиша — обратная связь по попаданию
-    if (lastKey && performance.now() - lastKeyAt < 450) {
-      const a = 1 - (performance.now() - lastKeyAt) / 450;
-      ctx.globalAlpha = a;
+    // итог последнего выстрела: пока летит — просто буква, потом ✓ или ✕
+    if (lastKey && performance.now() - lastKeyAt < 700) {
+      ctx.globalAlpha = 1 - (performance.now() - lastKeyAt) / 700;
       ctx.font = "bold 15px 'Courier New', monospace";
       ctx.textAlign = "center";
       ctx.fillStyle = INK;
-      ctx.fillText(
-        lastKeyOk ? lastKey.toUpperCase() : lastKey.toUpperCase() + " ✕",
-        W / 2, CANNON_Y + 24);
+      const mark = lastKeyOk === true ? " ✓" : lastKeyOk === false ? " ✕" : "";
+      ctx.fillText(lastKey.toUpperCase() + mark, cannonX, CANNON_Y + 28);
       ctx.globalAlpha = 1;
     }
   }
@@ -565,12 +648,37 @@
       return;
     }
 
+    if (e.key === "ArrowLeft")  { e.preventDefault(); held.left = true;  return; }
+    if (e.key === "ArrowRight") { e.preventDefault(); held.right = true; return; }
     if (e.key === "Enter") { e.preventDefault(); reset(true); return; }
     if (e.key === " ") { e.preventDefault(); bomb(); return; }
 
     const letter = resolveLetter(e);
     if (letter) { e.preventDefault(); shootLetter(letter); }
   });
+
+  document.addEventListener("keyup", e => {
+    if (e.key === "ArrowLeft")  held.left = false;
+    if (e.key === "ArrowRight") held.right = false;
+  });
+
+  // Основное управление — мышь: пушка встаёт под курсор мгновенно, без разгона.
+  // Стрелки оставлены как запасной вариант и в движении проигрывают мыши.
+  canvas.addEventListener("pointermove", e => {
+    const r = canvas.getBoundingClientRect();
+    const x = (e.clientX - r.left) * (W / r.width);
+    cannonX = Math.max(16, Math.min(W - 16, x));
+    held.left = held.right = false;
+  });
+  // клик — подрыв блока на линии огня, чтобы не тянуться к пробелу
+  canvas.addEventListener("pointerdown", e => {
+    e.preventDefault();
+    if (state === "ready" || state === "over") reset(true);
+    else bomb();
+  });
+  canvas.addEventListener("contextmenu", e => e.preventDefault());
+  // если вкладка потеряла фокус с зажатой стрелкой, пушка не должна «залипнуть»
+  window.addEventListener("blur", () => { held.left = held.right = false; });
 
   // Буква определяется и по e.key, и по физической клавише — чтобы играть
   // в русские слова, не переключая раскладку системы (и наоборот).
