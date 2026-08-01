@@ -140,7 +140,24 @@
          "вода мода сода коса роса роза коза лоза лиса липа лапа лупа сова " +
          "сила сало село дело тело мыло сено окно поле воля доля боль соль " +
          "моль роль пыль даль дичь ночь дочь речь печь мышь рожь ложь " +
-         "рука мука лужа нога дуга губа гриб краб").split(" "),
+         "рука мука лужа нога дуга губа гриб краб " +
+         "арка база бант банк беда бинт блок бобр брат буря ваза воля ворс " +
+         "враг врач гора дама дата дача доза дума душа дыра жаба жара желе " +
+         "жила заря зима знак звук зона зубр игла игра икра изба июнь июль " +
+         "кожа кора коса кофе кран круг куст лыжи люди мама мера мост муха " +
+         "небо нора ноша нить овца орех очки папа пара парк паук пила план " +
+         "плащ плот пляж порт пост пуля путь рама рана риск руда рыба сани " +
+         "свет слон сорт спор срок стол стул суть тень тигр тина туча угол " +
+         "удар узел улей утка факт флаг флот фонд фото холм храм цвет цепь " +
+         "цирк чаша часы чудо шаль шарф шкаф щека щука этаж юбка юмор яйцо " +
+         "ярус " +
+         "берег ветер вечер весна время голос гроза дверь земля зверь камни " +
+         "канал карта капля класс книга конус корма линия лодка месяц метро " +
+         "мечта место мысль напор народ огонь озеро песок песня поезд покой " +
+         "полка порог поток право птица пятно рамка речка ручка рынок связь " +
+         "склон слово смысл совет сокол спорт ствол стена столб судно сумка " +
+         "тайна театр товар точка тропа туман удача улица форма холод хвост " +
+         "центр число шапка шляпа штора шутка щенок").split(" "),
     en: ("bat bad bag ban bar bay bed bee beg bet bid big bin bit bog bow boy " +
          "bud bug bun bus but cap cot cow cub cue cut dam day den did die dig " +
          "dim din dip don dot dry dub dug dye ear eat eel elf elk elm end era " +
@@ -167,11 +184,101 @@
          "male pale sale tale tame fame game name same wine dine fine line " +
          "mine nine vine hope rope cope note vote hole mole pole role sole " +
          "back hack lack pack rack sack tack deck neck peck dock lock mock " +
-         "rock sock duck luck muck puck tuck").split(" "),
+         "rock sock duck luck muck puck tuck " +
+         "light night might right sight tight fight " +
+         "house hours mouse moose goose loose " +
+         "store stole stove stone shone " +
+         "glass brass grasp grass class " +
+         "break dread tread bread " +
+         "cable fable table " +
+         "block cloak clock crock " +
+         "lower power tower " +
+         "cream dream " +
+         "round pound mound bound found hound sound wound " +
+         "lance dance " +
+         "plane place plate plant " +
+         "brain drain grain train trail " +
+         "chain chart charm chair " +
+         "sheet sweet sleet " +
+         "spare spore spire " +
+         "stain stair stack stalk " +
+         "whale while white write " +
+         "crown brown crows " +
+         "pocket locket socket rocket " +
+         "bridge fridge " +
+         "slower blower flower " +
+         "better butter bitter litter letter " +
+         "winner wither winter " +
+         "string spring sprint").split(" "),
   };
+  // Частотные словари: нужны только для проверки ответа, в блоках не спавнятся.
+  // Блок между маркерами генерируется скриптом tools/build-wordlist.mjs —
+  // руками не править.
+  // >>> BULK-WORDLIST START <<<
+  const BULK = {
+    // 653 слов, https://raw.githubusercontent.com/hermitdave/FrequencyWords/master/content/2018/ru/ru_50k.txt
+    ru:
+    "бад бай бак башне башни башню бев бес била бит боле бом бон бора брай брак брал бремя брет брит " +
+    "брок брут букве букву буквы вай ваша вебер века верна вес весла весну весны ветер вето вечер " +
+    "вечна вида вила вир воде воду воды вождь воле воли волн воль волю воля вон вона вонь вора воск " +
+    "вот врат вытер гад гай гера гила гир гога года голод гон горд горе гори горн горо горой горох " +
+    "гору горы горю горя гроша груба груза груши губ гук дай дак дам дама дань двери деб дев дель дем " +
+    "дени дент день дерева дереве дереву дес десь деть дешево динь дит днм дов дог дожди дождя доз " +
+    "док доле дон дора дот доу дочь дуг дуй дул дух душ дым дыр дэб жак жила жир жуй жук жучка зад " +
+    "зак звезде звезду звезды зверь зев земле земли землю зива зиму зимы зон зуб зума игла игре игру " +
+    "игры икра йода кай как кака кала кана кара кароль каса каши кашу кев кес кид кий ким кима кин " +
+    "кинь кип кис киса кит киф киша кишка клич клюв книге книги книгу код кода кое коз кои кой койка " +
+    "кок кол коль ком кон кона конг коне кони коно кону коня коп кор кора коре корове корову коровы " +
+    "короле короли королю короля корона корь кот кошке кошки кошку круг куб кук куп кучка кэт лав лад " +
+    "лай лак лама лана лапа лас леа лев лево лег лего лед лез лей лем лен лена лень лео лес леса лет " +
+    "лета лети лету лея лив лига лиза лик лила лима лина липа лир лира лис лист лису лисы лись лито " +
+    "лица лок лом лон лора лоре лос лот лото лужа луи лук лука лун луне луну луны луч луча лэс люк " +
+    "мага май мак мака мала маме мамина маму мамы мана мар мара марина маша машине машину машины " +
+    "медведи медведя мер мере мес мест места меч мечте мечту мечты миа миг мид мии мик мил мила мин " +
+    "мио мире мис миса миф мию мия мода моде моет може молодо молока молоке мон моне мор мора морг " +
+    "морз мори моро морс морт морю моря мосс моче моше мук мур мыть мыши мышц мэр мяу над най нак нас " +
+    "наша неба небе небу него немо неро нес нила нима ноа ног нож ной ноль нора норе нот ночи ноя нтс " +
+    "нуна одень одно окна окне окну олень оон осени очень очно паба пай пак пака пакета пала пале " +
+    "пана папе папу папы пара паша пень пес песне песни песнь песню петер пила пир пит позе пола поли " +
+    "полк поло полу полы поль полю поля пон попа попе пора пост пот поте права прок птице птицу птицы " +
+    "пук пуле раб раба рад раз рай рака ракете ракету ракеты рал рам рама ран ранец рас раф раш раша " +
+    "раю рая рвет рев рек реке реки рекс реку рик рика рима риса роб роба ров рог род рода роз рой " +
+    "рок рока ром рон рос рост рот роу рою роя рук рука рут ручке ручки ручку рыбе рыбу рыбы рыцари " +
+    "рыцаря сай сал сам сама сан сас сау саша свел свен свр села сен сер сестре сестру сестры сеул " +
+    "сжег сид сида силе сили силу силы син сир сказке сказки сказку слова слове слову смазка собаке " +
+    "собаки собаку сов сок сол сола солнца солнцу сос соу соул срок стал стил стой стол стом стон " +
+    "стоп стою стоя стро стук стул суд сует суй сук сун сучка счет сын сыт сэн сэр сян тай так таша " +
+    "тель тени тень течь тима тир толк том тон тора тост тот точь траве травм траву травы трата тремя " +
+    "тук тунец туп тянь укола урод урон уток утра утру фила фон хай хак хека хит хода хон хора хоре " +
+    "хот хук цвет цветов цветом цев чад чак чан чао чар час чат чаша чаю чая чей чека числа числе " +
+    "числу чисто чой чон шила школе школу школы шон щит яблока яблоки",
+    // 372 слов, https://raw.githubusercontent.com/first20hours/google-10000-english/master/google-10000-english-no-swears.txt
+    en:
+    "ace apply bad bag ball ban band bar bat bay beam bean beat bed beer ben best bet better big bill " +
+    "bind bit block bob boc bold bon bool boom boot bound bow box boy brass break breed broad but cab " +
+    "cable cad cafe cage cake cal call cam came can cap cape car care cas case cat cattle cave cdt " +
+    "cet cfr chain chip choir cir click cod col cold com con cook cop cos cream cst cut dam dat deaf " +
+    "dear den dig dish doc dock dod doe dom don doom dos dot dow ear eat eight eng fake fall far fare " +
+    "fat fax fear fed feed fig fight file fill find fine firm fist five fix fog fold foo for found " +
+    "fox free fridge from fun gain gear gen gig glass golf good grams gross gun hall ham hand hat " +
+    "hear her hey hire hold hon hook horse house how hull icq ict ide jake jan jar jay jill jim jun " +
+    "kay ken kill kind king know kong lace lake lance land lane lat late later latter lead lean led " +
+    "len leon light like liver load lock log look low lower luke main make mall mar marked marker mat " +
+    "med men might mild mile mill mind mold mood mouse nam nat near need next niger night noon now " +
+    "oil own pain pam par pat pen pest pic pie pill pin ping pit pix planes pocket poor pound power " +
+    "rack raid rail ram ran rand rat read rear rec reed ref reg rep res rest rev rick rid rider right " +
+    "ring rod ron round rover row rug run said sake sam san sans sat say sec see seek seem seen sees " +
+    "sen send seo sep seq ser set shake shed shop show sig sight silk sin sing ski skip sku slip slow " +
+    "soa socket sold son soon sox spa sprint spy stake stan stat stay store storm string sub sue sum " +
+    "sun sur take tall tar tea tear ted ten test thee tight till timer tion tire told toner took trek " +
+    "treo true var vat wake walk walt war wear wed weed well west wild will wine wing winner wins " +
+    "wire wish worse would wound wow yea year yen zen",
+  };
+  // >>> BULK-WORDLIST END <<<
+
   const DICT = {
-    ru: new Set([...WORDS.ru, ...EXTRA.ru]),
-    en: new Set([...WORDS.en, ...EXTRA.en]),
+    ru: new Set([...WORDS.ru, ...EXTRA.ru, ...BULK.ru.split(" ").filter(Boolean)]),
+    en: new Set([...WORDS.en, ...EXTRA.en, ...BULK.en.split(" ").filter(Boolean)]),
   };
   const ALPHABET = {
     ru: "абвгдежзийклмнопрстуфхцчшщъыьэюя",
