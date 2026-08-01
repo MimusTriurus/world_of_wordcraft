@@ -3499,6 +3499,8 @@
   ctx.scale(dpr, dpr);
 
   const INK = "#2b3122";
+  const RED = "#b03a2e";       // единственный цвет на монохромном экране:
+                               // им помечено только испорченное слово
   const DANGER_Y = H - 74;     // ниже — потеря жизни
   const CANNON_Y = H - 34;
 
@@ -3655,7 +3657,10 @@
     return 1 + 0.2 * (b.word.length - 3) + 0.8 * (open - 1) + rarityCost(b.rank);
   }
 
-  const fieldLoad = () => blocks.reduce((sum, b) => alive(b) ? sum + blockCost(b) : sum, 0);
+  // Испорченные слова в бюджет не входят: иначе ошибка притормаживала бы поток
+  // новых слов, то есть снижала давление вместо того, чтобы повышать его.
+  const fieldLoad = () =>
+    blocks.reduce((sum, b) => alive(b) && !b.broken ? sum + blockCost(b) : sum, 0);
   const WORDS_PER_LEVEL = 8;
 
   function rules() {
@@ -3759,6 +3764,9 @@
       shown: word.split("").map((ch, i) => gaps.includes(i) ? "" : ch),
       gaps,
       rank: rankOf(word),                    // редкость загаданного, не собранного
+      strikes: 0,                            // сколько раз промахнулись по этому слову
+      wrong: new Set(),                      // ячейки с неверными буквами
+      broken: false,                         // слово испорчено, собрать уже нельзя
       // правило наводки запоминаем при появлении: блок, взлетевший при старых
       // правилах, не должен посреди полёта потребовать точного прицела
       aim: needsAim(),
@@ -3915,7 +3923,8 @@
   function reveal(b) {
     reveals.push({
       word: b.word,
-      gaps: b.gaps.filter(i => !b.shown[i]),   // что осталось неразгаданным
+      // неразгаданное — и пустые пропуски, и те, куда воткнулась неверная буква
+      gaps: b.gaps.filter(i => !b.shown[i] || b.wrong.has(i)),
       x: b.x + b.w / 2,
       y: b.y + b.h / 2,
       t: REVEAL_TIME,
@@ -3967,6 +3976,26 @@
     const rarity = b.rank <= 1500 ? 1 : b.rank <= 4000 ? 1.4
                  : b.rank <= 10000 ? 1.8 : 2.4;
     return Math.round((20 * b.word.length + 60 * b.gaps.length) * rarity);
+  }
+
+  // Неверная буква. Первый раз — только предупреждение: игра не отличает
+  // опечатку от незнания, и убивать слово за случайное нажатие несправедливо.
+  // Второй промах по тому же блоку втыкает букву в пропуск, и слово уже не
+  // собрать — остаётся снести его кликом или бомбой.
+  const STRIKES_TO_BREAK = 2;
+
+  function wrongLetter(b, letter, cell) {
+    b.strikes++;
+    const i = cell !== -1 ? cell : b.gaps.find(g => !b.shown[g]);
+    if (b.strikes < STRIKES_TO_BREAK || i === undefined) {
+      miss(b, "Не подходит:");
+      return;
+    }
+    b.shown[i] = letter;
+    b.wrong.add(i);
+    b.broken = true;
+    burst(b, 10);
+    miss(b, "Слово испорчено:");
   }
 
   // буква прилетела в блок, но не подошла
@@ -4061,13 +4090,21 @@
         if (s.x < b.x || s.x > b.x + b.w) continue;
         if (s.y > b.y + b.h || s.y < b.y) continue;
 
+        // в испорченное слово уже ничего не вставить — только снести
+        if (b.broken) { miss(b, "Слово испорчено:"); return true; }
+
         // Пока точный прицел не включён, хватает попадания в блок: буква сама
         // встаёт в подходящий пропуск. С b.aim целиться нужно в саму ячейку.
-        const i = b.aim ? cellAt(b, s.x) : gapFor(b, s.letter);
-        if (i === -1) miss(b, b.aim ? "Мимо буквы:" : "Не подходит:");
-        else if (b.shown[i]) miss(b, "Тут уже<br>есть буква:");
-        else if (acceptsAt(b, i).has(s.letter)) fill(b, i, s.letter);
-        else miss(b, "Не подходит:");
+        // Промах по букве наводки — не ошибка знания, за неё блок не портим.
+        const aimed = b.aim ? cellAt(b, s.x) : -1;
+        if (b.aim && (aimed === -1 || b.shown[aimed])) {
+          miss(b, aimed === -1 ? "Мимо буквы:" : "Тут уже<br>есть буква:");
+          return true;
+        }
+
+        const i = b.aim ? aimed : gapFor(b, s.letter);
+        if (i !== -1 && acceptsAt(b, i).has(s.letter)) fill(b, i, s.letter);
+        else wrongLetter(b, s.letter, i);
         return true;
       }
 
@@ -4173,12 +4210,13 @@
 
     // корпус; hurt — вспышка от буквы, которая блоку не подошла
     ctx.fillStyle = solvedNow ? INK
+                  : b.broken ? "rgba(176,58,46,.22)"
                   : b.hurt ? "rgba(43,49,34,.45)"
                   : "rgba(43,49,34,.10)";
     roundRect(b.x, b.y, b.w, b.h, 6);
     ctx.fill();
     ctx.lineWidth = isTarget && !solvedNow && !dead ? 3 : 1.5;
-    ctx.strokeStyle = INK;
+    ctx.strokeStyle = b.broken ? RED : INK;
     ctx.stroke();
 
     // буквы
@@ -4210,7 +4248,11 @@
         ctx.lineTo(cx + step / 2 - 3, cy + 11);
         ctx.stroke();
       } else {
-        ctx.fillStyle = solvedNow ? "#9ead86" : INK;
+        // неверная буква — красным, остальные в испорченном слове приглушены
+        ctx.fillStyle = solvedNow ? "#9ead86"
+                      : b.wrong.has(i) ? RED
+                      : b.broken ? "rgba(43,49,34,.5)"
+                      : INK;
         ctx.fillText(ch.toUpperCase(), cx, cy);
       }
     }
