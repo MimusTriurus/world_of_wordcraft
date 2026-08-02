@@ -12847,7 +12847,7 @@
     score = 0; lives = LIVES_START;
     bombs = 0; tips = 0; shells = 0;      // обойма пуста, всё берётся раздачей
     combo = 0; bestCombo = 0; solved = 0;
-    taken.clear();
+    taken.clear(); draftNext = null;
     stage = 0; stageSpawned = 0; poolDry = false;
     lap = mods.lap;
     used.clear(); dropBag();
@@ -13192,13 +13192,22 @@
   // функции, а осознанная смена правила здесь.
   // Раздача. Отдельного экрана паузы выдумывать не пришлось: этап кончается
   // на пустом поле — этого требует stageDone, — так что игра там уже стоит.
-  // Экранов два, и различает их kind: между этапами наполняется обойма, на
-  // границе круга вместо этого предлагается улучшение. Одна остановка — один
-  // выбор: обойму игрок наполняет дважды за круг, на третьей границе его ждёт
-  // улучшение.
+  // Экранов два, и различает их kind: обойма и улучшение.
+  //
+  // Каждый пройденный этап даёт обойму, каждый пройденный круг — ещё и
+  // улучшение. На границе круга это два экрана подряд, обойма первой: третий
+  // этап пройден так же, как первые два, и лишать его раздачи только потому,
+  // что он последний, не за что. Раньше улучшение вставало на её место, и
+  // круг молча съедал одну раздачу из трёх.
   const draft = { kind: "supply", index: 0, title: "", cards: [] };
 
+  // Заголовок улучшения, отложенного до конца текущей раздачи. null — за этой
+  // раздачей ничего не стоит и после выбора игра продолжается.
+  let draftNext = null;
+
   const draftRows = () => draft.kind === "upgrade" ? draft.cards.length : SUPPLIES.length;
+
+  const upgradesLeft = () => UPGRADES.filter(u => !taken.has(u.id));
 
   function openDraft(title) {
     draft.kind = "supply";
@@ -13209,7 +13218,7 @@
 
   // Пул кончился — круг возвращает обычную раздачу, а не пустой экран.
   function openUpgrade(title) {
-    const left = UPGRADES.filter(u => !taken.has(u.id));
+    const left = upgradesLeft();
     if (!left.length) { openDraft(title); return; }
     const bag = left.slice();
     draft.cards = [];
@@ -13221,23 +13230,31 @@
     state = "draft";
   }
 
+  // Выбор сделан: либо возвращаемся в игру, либо открываем отложенный экран.
+  function afterPick() {
+    if (draftNext === null) { state = "play"; return; }
+    const title = draftNext;
+    draftNext = null;
+    openUpgrade(title);
+  }
+
   function takeSupply(i) {
     const s = SUPPLIES[i];
     if (s.key === "shells") shells += s.n;
     else if (s.key === "bombs") bombs += s.n;
     else tips += s.n;
-    state = "play";
     setMsg(`+${s.n} ${s.label.toLowerCase()}`);
     flash = 0.6;
+    afterPick();
     syncHud();
   }
 
   function takeUpgrade(i) {
     const u = draft.cards[i];
     taken.add(u.id);              // эффекта пока нет: правила ещё заглушки
-    state = "play";
     setMsg(`${u.name}<br>${u.note}`);
     flash = 1;
+    afterPick();
     syncHud();
   }
 
@@ -13507,7 +13524,11 @@
     setMsg(`КРУГ ${lap}<br>${lapGrowth()}<br>` + STAGES[0].name);
     flash = 1;
     syncHud();
-    openUpgrade(`КРУГ ${lap - 1} ПРОЙДЕН`);
+    // Два экрана подряд: обойма за последний этап, следом улучшение за круг.
+    // Если пул улучшений вычерпан, второго экрана нет вовсе — показывать
+    // подряд две одинаковые раздачи незачем.
+    draftNext = upgradesLeft().length ? `КРУГ ${lap - 1} ПРОЙДЕН` : null;
+    openDraft(`ЭТАП ${STAGES.length} ПРОЙДЕН`);
   }
 
   function loseLife(b) {
@@ -14169,6 +14190,10 @@
     ctx.fillStyle = INK;
     ctx.textAlign = "center";
     ctx.font = "12px 'Courier New', monospace";
+    // Два экрана подряд бывают только на границе круга. Без предупреждения
+    // второй читается как сбой: игрок уже выбрал и ждёт возврата в игру.
+    if (draftNext !== null)
+      ctx.fillText("далее — улучшение за круг", W / 2, bottom - 34);
     ctx.fillText("1 2 3 или ↑ ↓ и ENTER", W / 2, bottom - 18);
   }
 
