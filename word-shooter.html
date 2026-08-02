@@ -12553,6 +12553,39 @@
   // давать силу и таблица рекордов станет таблицей стажа. См. docs/roguelite.md.
   const gear = { shells: null, bombs: null, tips: null };
 
+  // ---------------------------------------------------------------- улучшения
+  // Второй слой поверх обоймы: за пройденный круг — три правила на выбор,
+  // берётся одно. Симметрия прямая — круг добавляет игре +5 px/s, круг же
+  // добавляет игроку правило.
+  //
+  // Слой достаётся не всем, и это принято с открытыми глазами: круг 1 проходят
+  // 56 % забегов быстрого игрока и ни один забег среднего и медленного. Отсюда
+  // требование к содержанию — улучшение обязано быть ПРАВИЛОМ, а не процентом.
+  // При 0.6 выдачи за забег прибавка в процентах невидима: даже −25 % ко
+  // времени на слово двигают круг с 1.7 на 1.8. Подробности — docs/roguelite.md.
+  //
+  // Пул велик намеренно: разнообразие работает не внутри забега, а между ними.
+  // Первый выбор — это весь опыт почти для всех, и он должен быть разным.
+  //
+  // ЗАГЛУШКИ. Все тринадцать выбираются, запоминаются и показываются в HUD,
+  // но правил пока не меняют. Столбец «ручка» — куда цеплять эффект.
+  const UPGRADES = [
+    { id: "stab",   name: "СТАБИЛИЗАТОР", note: "снос не сбрасывает комбо" },
+    { id: "shield", name: "ЩИТ КОМБО",    note: "первый промах прощается" },
+    { id: "nocap",  name: "БЕЗ ПОТОЛКА",  note: "множитель комбо выше ×5" },
+    { id: "syn",    name: "СИНОНИМЫ",     note: "в пропуск подходит больше букв" },
+    { id: "rapid",  name: "СКОРОСТРЕЛЬНЫЙ", note: "пауза между выстрелами вдвое" },
+    { id: "line",   name: "НИЖЕ ЛИНИЯ",   note: "линия смерти опущена" },
+    { id: "sparse", name: "РАЗРЕЖЕНИЕ",   note: "блоков на поле меньше" },
+    { id: "brake",  name: "ТОРМОЖЕНИЕ",   note: "верная буква тормозит блок" },
+    { id: "heart",  name: "ВТОРОЕ ДЫХАНИЕ", note: "+1 жизнь" },
+    { id: "erud",   name: "ЭРУДИТ",       note: "слова реже, очков больше" },
+    { id: "gun",    name: "ОРУЖЕЙНИК",    note: "раздача даёт +5 снарядов" },
+    { id: "sap",    name: "САПЁР",        note: "раздача даёт +2 бомбы" },
+    { id: "lex",    name: "ТОЛКОВАТЕЛЬ",  note: "раздача даёт +4 подсказки" },
+  ];
+  const taken = new Set();       // взятые за забег, повторно не предлагаются
+
   // Круги. Победы у забега нет: пройдя все этапы, он начинается заново и
   // каждый раз быстрее. Скорость выбрана рычагом потому, что она единственная
   // ни во что не упирается — длина слов кончается на восьми буквах, пропуски
@@ -12786,6 +12819,7 @@
     score = 0; lives = LIVES_START;
     bombs = 0; tips = 0; shells = 0;      // обойма пуста, всё берётся раздачей
     combo = 0; bestCombo = 0; solved = 0;
+    taken.clear();
     stage = 0; stageSpawned = 0; poolDry = false;
     lap = mods.lap;
     used.clear(); dropBag();
@@ -13124,6 +13158,36 @@
   // Единственное место, где запасы пополняются, — см. правило у их констант.
   // Если понадобится платить откуда-то ещё, это будет не новая строчка в чужой
   // функции, а осознанная смена правила здесь.
+  // Раздача. Отдельного экрана паузы выдумывать не пришлось: этап кончается
+  // на пустом поле — этого требует stageDone, — так что игра там уже стоит.
+  // Экранов два, и различает их kind: между этапами наполняется обойма, на
+  // границе круга вместо этого предлагается улучшение. Одна остановка — один
+  // выбор: обойму игрок наполнял шесть раз по ходу круга.
+  const draft = { kind: "supply", index: 0, title: "", cards: [] };
+
+  const draftRows = () => draft.kind === "upgrade" ? draft.cards.length : SUPPLIES.length;
+
+  function openDraft(title) {
+    draft.kind = "supply";
+    draft.index = 0;
+    draft.title = title;
+    state = "draft";
+  }
+
+  // Пул кончился — круг возвращает обычную раздачу, а не пустой экран.
+  function openUpgrade(title) {
+    const left = UPGRADES.filter(u => !taken.has(u.id));
+    if (!left.length) { openDraft(title); return; }
+    const bag = left.slice();
+    draft.cards = [];
+    for (let i = 0; i < 3 && bag.length; i++)
+      draft.cards.push(...bag.splice(Math.floor(Math.random() * bag.length), 1));
+    draft.kind = "upgrade";
+    draft.index = 0;
+    draft.title = title;
+    state = "draft";
+  }
+
   function takeSupply(i) {
     const s = SUPPLIES[i];
     if (s.key === "shells") shells += s.n;
@@ -13135,28 +13199,29 @@
     syncHud();
   }
 
-  // Раздача. Отдельного экрана паузы выдумывать не пришлось: этап кончается
-  // на пустом поле — этого требует stageDone, — так что игра там уже стоит.
-  const draft = { index: 0, title: "" };
-
-  function openDraft(title) {
-    draft.index = 0;
-    draft.title = title;
-    state = "draft";
+  function takeUpgrade(i) {
+    const u = draft.cards[i];
+    taken.add(u.id);              // эффекта пока нет: правила ещё заглушки
+    state = "play";
+    setMsg(`${u.name}<br>${u.note}`);
+    flash = 1;
+    syncHud();
   }
 
+  const takePick = i => draft.kind === "upgrade" ? takeUpgrade(i) : takeSupply(i);
+
   function draftKey(e) {
-    const n = SUPPLIES.length;
+    const n = draftRows();
     switch (e.key) {
       case "ArrowUp": case "ArrowLeft":
         draft.index = (draft.index + n - 1) % n; break;
       case "ArrowDown": case "ArrowRight":
         draft.index = (draft.index + 1) % n; break;
       case "Enter": case " ":
-        takeSupply(draft.index); break;
+        takePick(draft.index); break;
       default:
         // цифрой — сразу, руки и так на клавиатуре
-        if (e.key >= "1" && e.key <= String(n)) takeSupply(+e.key - 1);
+        if (e.key >= "1" && e.key <= String(n)) takePick(+e.key - 1);
         else return false;
     }
     return true;
@@ -13404,7 +13469,7 @@
     setMsg(`КРУГ ${lap}<br>Скорость +${(lap - 1) * LAP_SPEED}<br>` + STAGES[0].name);
     flash = 1;
     syncHud();
-    openDraft(`КРУГ ${lap - 1} ПРОЙДЕН`);
+    openUpgrade(`КРУГ ${lap - 1} ПРОЙДЕН`);
   }
 
   function loseLife(b) {
@@ -13887,22 +13952,141 @@
     }
   }
 
-  // Экран раздачи. Три строки, каждая в одну фразу: игра и так нагружает
-  // чтение, и абзац на карточке стоил бы дороже, чем даёт.
-  const DRAFT_STEP = 62, DRAFT_W = 330, DRAFT_HEAD = 96, DRAFT_FOOT = 44;
+  // Иконки улучшений. Рисуются примитивами: файл самодостаточный, картинок в
+  // нём нет и быть не может. Каждая получает центр и размер, цвет ставит
+  // вызывающий — и обводку, и заливку, потому что часть иконок из того и того.
+  const ICONS = {
+    stab(x, y, s) {                                   // звено не рвётся
+      ctx.beginPath();
+      ctx.arc(x - s * .2, y, s * .3, 0, 7);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(x + s * .2, y, s * .3, 0, 7);
+      ctx.stroke();
+    },
+    shield(x, y, s) {
+      ctx.beginPath();
+      ctx.moveTo(x, y - s * .45);
+      ctx.lineTo(x + s * .35, y - s * .25);
+      ctx.lineTo(x + s * .28, y + s * .2);
+      ctx.lineTo(x, y + s * .45);
+      ctx.lineTo(x - s * .28, y + s * .2);
+      ctx.lineTo(x - s * .35, y - s * .25);
+      ctx.closePath();
+      ctx.stroke();
+    },
+    nocap(x, y, s) {                                  // стрелка сквозь потолок
+      ctx.beginPath();
+      ctx.moveTo(x - s * .4, y - s * .35);
+      ctx.lineTo(x + s * .4, y - s * .35);
+      ctx.moveTo(x, y + s * .45);
+      ctx.lineTo(x, y - s * .2);
+      ctx.moveTo(x - s * .2, y);
+      ctx.lineTo(x, y - s * .2);
+      ctx.lineTo(x + s * .2, y);
+      ctx.stroke();
+    },
+    syn(x, y, s) {                                    // «то же самое»
+      ctx.beginPath();
+      ctx.moveTo(x - s * .35, y - s * .12);
+      ctx.lineTo(x + s * .35, y - s * .12);
+      ctx.moveTo(x - s * .35, y + s * .12);
+      ctx.lineTo(x + s * .35, y + s * .12);
+      ctx.stroke();
+    },
+    rapid(x, y, s) {                                  // очередь
+      ctx.beginPath();
+      for (const dx of [-.3, 0, .3]) {
+        ctx.moveTo(x + s * dx - s * .12, y - s * .25);
+        ctx.lineTo(x + s * dx + s * .08, y);
+        ctx.lineTo(x + s * dx - s * .12, y + s * .25);
+      }
+      ctx.stroke();
+    },
+    line(x, y, s) {                                   // линия ниже
+      ctx.beginPath();
+      ctx.moveTo(x - s * .4, y + s * .35);
+      ctx.lineTo(x + s * .4, y + s * .35);
+      ctx.moveTo(x, y - s * .4);
+      ctx.lineTo(x, y + s * .1);
+      ctx.moveTo(x - s * .18, y - s * .1);
+      ctx.lineTo(x, y + s * .1);
+      ctx.lineTo(x + s * .18, y - s * .1);
+      ctx.stroke();
+    },
+    sparse(x, y, s) {                                 // блоков меньше
+      for (const [dx, dy] of [[-.3, -.3], [.3, -.3], [-.3, .3], [.3, .3]])
+        ctx.fillRect(x + s * dx - 2.5, y + s * dy - 2.5, 5, 5);
+    },
+    brake(x, y, s) {
+      ctx.strokeRect(x - s * .28, y - s * .4, s * .56, s * .42);
+      ctx.beginPath();
+      ctx.moveTo(x - s * .4, y + s * .3);
+      ctx.lineTo(x + s * .4, y + s * .3);
+      ctx.stroke();
+    },
+    heart(x, y, s) {
+      ctx.beginPath();
+      ctx.moveTo(x, y + s * .38);
+      ctx.bezierCurveTo(x - s * .6, y - s * .05, x - s * .28, y - s * .5, x, y - s * .16);
+      ctx.bezierCurveTo(x + s * .28, y - s * .5, x + s * .6, y - s * .05, x, y + s * .38);
+      ctx.fill();
+    },
+    erud(x, y, s) {                                   // книга
+      ctx.strokeRect(x - s * .38, y - s * .32, s * .76, s * .64);
+      ctx.beginPath();
+      ctx.moveTo(x, y - s * .32);
+      ctx.lineTo(x, y + s * .32);
+      ctx.stroke();
+    },
+    gun(x, y, s) {                                    // снаряд
+      ctx.beginPath();
+      ctx.moveTo(x, y - s * .42);
+      ctx.lineTo(x + s * .2, y - s * .12);
+      ctx.lineTo(x + s * .2, y + s * .4);
+      ctx.lineTo(x - s * .2, y + s * .4);
+      ctx.lineTo(x - s * .2, y - s * .12);
+      ctx.closePath();
+      ctx.fill();
+    },
+    sap(x, y, s) {                                    // бомба с фитилём
+      ctx.beginPath();
+      ctx.arc(x, y + s * .1, s * .3, 0, 7);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.moveTo(x + s * .16, y - s * .16);
+      ctx.lineTo(x + s * .36, y - s * .42);
+      ctx.stroke();
+    },
+    lex(x, y, s) {                                    // реплика
+      ctx.strokeRect(x - s * .38, y - s * .34, s * .76, s * .5);
+      ctx.beginPath();
+      ctx.moveTo(x - s * .12, y + s * .16);
+      ctx.lineTo(x - s * .06, y + s * .4);
+      ctx.lineTo(x + s * .14, y + s * .16);
+      ctx.stroke();
+    },
+  };
+
+  // Экран раздачи. Строки в одну фразу: игра и так нагружает чтение, и абзац
+  // на карточке стоил бы дороже, чем даёт. Улучшению нужно больше места —
+  // у него иконка и две строки текста.
+  const DRAFT_W = 330, DRAFT_HEAD = 96, DRAFT_FOOT = 44;
+  const draftStep = () => draft.kind === "upgrade" ? 76 : 62;
 
   function draftTop() {
-    const body = DRAFT_HEAD + SUPPLIES.length * DRAFT_STEP + DRAFT_FOOT;
+    const body = DRAFT_HEAD + draftRows() * draftStep() + DRAFT_FOOT;
     return Math.max(6, (H - body) / 2);
   }
 
   function draftRect(i) {
-    return { x: (W - DRAFT_W) / 2, y: draftTop() + DRAFT_HEAD + i * DRAFT_STEP,
-             w: DRAFT_W, h: DRAFT_STEP - 12 };
+    const step = draftStep();
+    return { x: (W - DRAFT_W) / 2, y: draftTop() + DRAFT_HEAD + i * step,
+             w: DRAFT_W, h: step - 12 };
   }
 
   function draftAt(x, y) {
-    for (let i = 0; i < SUPPLIES.length; i++) {
+    for (let i = 0; i < draftRows(); i++) {
       const r = draftRect(i);
       if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) return i;
     }
@@ -13910,8 +14094,9 @@
   }
 
   function drawDraft() {
+    const up = draft.kind === "upgrade";
     const top = draftTop();
-    const bottom = top + DRAFT_HEAD + SUPPLIES.length * DRAFT_STEP + DRAFT_FOOT;
+    const bottom = top + DRAFT_HEAD + draftRows() * draftStep() + DRAFT_FOOT;
 
     ctx.fillStyle = "rgba(158,173,134,.94)";
     ctx.fillRect(0, top, W, bottom - top);
@@ -13921,12 +14106,12 @@
     ctx.textAlign = "center";
     ctx.fillStyle = INK;
     ctx.font = "bold 26px 'Courier New', monospace";
-    ctx.fillText("В ОБОЙМУ", W / 2, top + 40);
+    ctx.fillText(up ? "УЛУЧШЕНИЕ" : "В ОБОЙМУ", W / 2, top + 40);
     ctx.font = "13px 'Courier New', monospace";
     ctx.fillText(draft.title, W / 2, top + 66);
 
-    for (let i = 0; i < SUPPLIES.length; i++) {
-      const s = SUPPLIES[i], r = draftRect(i), on = i === draft.index;
+    for (let i = 0; i < draftRows(); i++) {
+      const r = draftRect(i), on = i === draft.index;
       if (on) {
         ctx.fillStyle = INK;
         roundRect(r.x, r.y, r.w, r.h, 5);
@@ -13937,24 +14122,42 @@
         roundRect(r.x, r.y, r.w, r.h, 5);
         ctx.stroke();
       }
-      ctx.fillStyle = on ? "#9ead86" : INK;
-      ctx.textAlign = "left";
-      ctx.font = "bold 17px 'Courier New', monospace";
-      ctx.fillText(`${i + 1}. ${s.label}`, r.x + 14, r.y + 21);
-      ctx.font = "12px 'Courier New', monospace";
-      // Со свойством из меты строка описывает не слот вообще, а то, чем игрок
-      // его снарядил. Пока свойств нет, всегда показывается базовое.
-      const g = gear[s.key];
-      ctx.fillText(g ? g.note : s.note, r.x + 14, r.y + 39);
-      ctx.textAlign = "right";
-      ctx.font = "bold 20px 'Courier New', monospace";
-      ctx.fillText("+" + s.n, r.x + r.w - 14, r.y + 30);
+      const fg = on ? "#9ead86" : INK;
+      ctx.fillStyle = fg;
+      if (up) drawUpgradeRow(draft.cards[i], r, i, fg);
+      else drawSupplyRow(SUPPLIES[i], r, i);
     }
 
     ctx.fillStyle = INK;
     ctx.textAlign = "center";
     ctx.font = "12px 'Courier New', monospace";
     ctx.fillText("1 2 3 или ↑ ↓ и ENTER", W / 2, bottom - 18);
+  }
+
+  function drawSupplyRow(s, r, i) {
+    ctx.textAlign = "left";
+    ctx.font = "bold 17px 'Courier New', monospace";
+    ctx.fillText(`${i + 1}. ${s.label}`, r.x + 14, r.y + 21);
+    ctx.font = "12px 'Courier New', monospace";
+    // Со свойством из меты строка описывает не слот вообще, а то, чем игрок
+    // его снарядил. Пока свойств нет, всегда показывается базовое.
+    const g = gear[s.key];
+    ctx.fillText(g ? g.note : s.note, r.x + 14, r.y + 39);
+    ctx.textAlign = "right";
+    ctx.font = "bold 20px 'Courier New', monospace";
+    ctx.fillText("+" + s.n, r.x + r.w - 14, r.y + 30);
+  }
+
+  function drawUpgradeRow(u, r, i, fg) {
+    const cy = r.y + r.h / 2;
+    ctx.strokeStyle = fg; ctx.fillStyle = fg; ctx.lineWidth = 2;
+    ICONS[u.id](r.x + 34, cy, 32);
+    ctx.fillStyle = fg;
+    ctx.textAlign = "left";
+    ctx.font = "bold 15px 'Courier New', monospace";
+    ctx.fillText(`${i + 1}. ${u.name}`, r.x + 62, cy - 6);
+    ctx.font = "12px 'Courier New', monospace";
+    ctx.fillText(u.note, r.x + 62, cy + 14);
   }
 
   function banner(title, sub) {
@@ -14000,7 +14203,12 @@
       `<br>слов ${Math.min(stageSpawned, r.quota)}/${r.quota}` +
       (needsAim() ? `<br>прицел по букве` : "") +
       `<br>скорость ${Math.round(speedNow(r))}` +
-      `<br>очки ×${(speedNow(r) / SPEED_PAR).toFixed(2)}`;
+      `<br>очки ×${(speedNow(r) / SPEED_PAR).toFixed(2)}` +
+      // Улучшение достаётся не всем, поэтому оно должно быть хотя бы названо:
+      // строка превращает недостижимое содержимое в заявленную цель.
+      (taken.size
+        ? "<br>" + [...taken].map(id => UPGRADES.find(u => u.id === id).name).join("<br>")
+        : "<br>круг → улучшение");
   }
 
   // ---------------------------------------------------------------- ввод
