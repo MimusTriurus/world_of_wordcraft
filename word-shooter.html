@@ -14947,17 +14947,24 @@
     //
     // Игровому времени это ничего не стоит: на раздаче update() возвращается
     // сразу, мир стоит. Плата только кадрами, и замеры от неё не меняются.
-    const DRAFT_LOOK = 0.55;      // с — сколько бот смотрит на список
-    const DRAFT_TAKE = 1.3;       // с — когда подтверждает выбор
+    // Времена подобраны на зрителя, а не на бота: смотрящему со стороны нужно
+    // успеть заметить, что экран открылся, прочитать три строки, увидеть, куда
+    // встал курсор, и связать это с тем, что прибавилось. При 0.55 / 1.3 с
+    // процесс мелькал — экран было видно, а выбор нет.
+    const DRAFT_LOOK = 1.2;       // с — сколько бот читает список
+    const DRAFT_TAKE = 2.8;       // с — когда подтверждает выбор
+    // Улучшения дольше: там у каждой карточки название и правило, читать больше.
+    const DRAFT_SLOW = 1.45;
     let draftT = 0, draftPick = -1;
 
     function draftStep(dt) {
+      const slow = draft.kind === "upgrade" ? DRAFT_SLOW : 1;
       draftT += dt;
-      if (draftPick === -1 && draftT >= DRAFT_LOOK) {
+      if (draftPick === -1 && draftT >= DRAFT_LOOK * slow) {
         draftPick = decideDraft();
         draft.index = draftPick;      // курсор виден: он и есть «бот выбирает»
       }
-      if (draftPick !== -1 && draftT >= DRAFT_TAKE) {
+      if (draftPick !== -1 && draftT >= DRAFT_TAKE * slow) {
         if (draft.kind === "upgrade") stats.upgrades.push(draft.cards[draftPick].name);
         takePick(draftPick);
         draftT = 0; draftPick = -1;
