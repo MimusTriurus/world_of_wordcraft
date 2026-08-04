@@ -17,14 +17,20 @@ export function mulberry32(seed) {
 
 const noop = () => {};
 function fakeCtx() {
-  return new Proxy({}, {
+  // measureText нужен настоящий: wrapText в подсказке читает .width, и на
+  // заглушке-пустышке падает. Courier моноширинный, 13px ≈ 7.8px на символ —
+  // разбивка на строки выходит та же, что в браузере, с точностью до слова.
+  const base = { measureText: s => ({ width: s.length * 7.8 }) };
+  return new Proxy(base, {
     get: (o, k) => (k in o ? o[k] : (o[k] = noop)),
     set: (o, k, v) => ((o[k] = v), true),
   });
 }
 
 export function boot(seed = 1) {
-  const raw = readFileSync(HTML, "utf8");
+  // Переводы строк нормализуем: в рабочей копии на Windows файл лежит с CRLF,
+  // и якоря, по которым мы патчим скрипт, перестают совпадать.
+  const raw = readFileSync(HTML, "utf8").replace(/\r\n/g, "\n");
   const open = raw.indexOf("<script>");
   const close = raw.lastIndexOf("</script>");
   let src = raw.slice(open + 8, close);
@@ -36,7 +42,7 @@ export function boot(seed = 1) {
 
   const exportCode = `
   globalThis.__t = {
-    update, reset, spawn, blockCost, fieldLoad, alive, rules, solve, bombAll,
+    update, reset, spawn, blockCost, fieldLoad, alive, rules, solve, dropBomb,
     DANGER_Y, CANNON_Y, STAGES,
     get blocks() { return blocks; },
     get state() { return state; },  set state(v) { state = v; },
@@ -48,6 +54,47 @@ export function boot(seed = 1) {
     // сдача блока: то же, что клик ЛКМ, но без возни с наводкой пушки
     kill(b) { b.state = "dead"; b.timer = 0; combo = 0; },
     finish(b) { b.shown = b.word.split(""); solve(b); },
+
+    // ---- для ИИ-игрока: настоящие кнопки, а не обход правил ----------------
+    // Бот обязан ходить через них: они списывают запасы, держат паузу между
+    // выстрелами и сжигают комбо ровно так же, как у человека. Всё, что мимо,
+    // — это уже не измерение игры, а измерение чего-то другого.
+    shootLetter, shootBlock, dropBomb, hint, takePick, draftRows,
+    W, H, CANNON_SPEED, SHOT_SPEED, SHOT_COOLDOWN, MAX_SHOTS, STRIKES_TO_BREAK,
+    speedNow, loadMul, loadNow, mods, draft, glossOf,
+    get cannonX() { return cannonX; }, set cannonX(v) { cannonX = v; },
+    get cooldown() { return cooldown; },
+    get shots() { return shots; },
+    get shells() { return shells; },  get tips() { return tips; },
+    get lap() { return lap; },
+    get stageSpawned() { return stageSpawned; },
+
+    // Язык бота: тот же корпус, что у игры. Словарный запас бота — его
+    // подмножество по рангу, см. tools/ai/player.mjs.
+    get lang() { return lang; },
+    BY_LEN, rankOf, ALPHABET,
+
+    // ---- автопилот ---------------------------------------------------------
+    // Ядро решений ИИ-игрока живёт в самой игре, а не здесь: двух копий быть не
+    // должно, иначе Node мерил бы не то, что играет человек. См. docs/ai.md.
+    makeAutopilot, BOT_CLASSES, BOT_KNOBS, BOT_POLICY,
+    // cellAt — то, чем игра читает попадание в букву. Нужен, чтобы проверять
+    // наводку бота её же формулой, а не копией формулы.
+    cellAt, needsAim,
+
+    // ---- только для прежней модели игрока (tools/ai/legacy.mjs) ------------
+    // Буква, попавшая в блок, без баллистики: прежняя модель считала время на
+    // слово и считала букву доставленной. Через них она платит настоящим
+    // комбо, настоящими промахами и настоящей порчей слова, но не платит за
+    // наводку и полёт, которых у неё не было. Новый бот ими не пользуется —
+    // он стреляет из пушки, как человек.
+    land: { fill, wrongLetter },
+
+    // ОРАКУЛ. Знает про слово то, чего игрок не видит. Новому боту недоступен:
+    // граница восприятия у него своя и живёт в игре — botSee(). Здесь оракул
+    // нужен прежней модели, у которой представления о словах нет вовсе, только
+    // вероятность попасть, и стендам, которые проверяют самого бота.
+    oracle: { acceptsAt, gapChoices, neighboursOf },
   };`;
   const tail = "  requestAnimationFrame(frame);\n})();";
   if (!src.includes(tail)) throw new Error("не нашёл хвост цикла");
