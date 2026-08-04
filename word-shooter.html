@@ -39,9 +39,13 @@
     gap: 8px;
   }
   canvas { display: block; border-radius: 2px; cursor: crosshair; touch-action: none; }
+  /* Размеры выбраны по ШИРИНЕ, а не по свободному месту: его после удаления
+     блока сообщений осталось около 240 px по вертикали, а панель по-прежнему 112
+     px в ширину, и упирается всё в неё. Courier моноширинный: знак занимает
+     0.6 × кегль плюс 1 px разрядки, отсюда и предельные кегли ниже. */
   .hud {
     width: 112px;
-    font-size: 12px;
+    font-size: 13px;
     line-height: 1.4;
     letter-spacing: 1px;
     display: flex;
@@ -49,12 +53,19 @@
   }
   .hud .label { opacity: .6; }
   /* Ряд «круг · этап · слова»: три колонки по содержимому, метка над числом.
-     Метки здесь без разрядки и мельче — иначе «СЛОВА» не влезает в колонку. */
+     Разрядки здесь нет вовсе — с ней «10·1/3·10/10» в 112 px не укладывается.
+     16 px это предел: при 17 px худший случай даёт 116 px на 112 доступных. */
   .hud .trio { display: flex; gap: 7px; }
   .hud .trio > div { white-space: nowrap; }
-  .hud .trio .label { font-size: 10px; letter-spacing: 0; }
-  .hud .value { font-size: 20px; font-weight: bold; margin-bottom: 7px; }
-  .hud .value.small { font-size: 15px; }
+  .hud .trio .label { font-size: 11px; letter-spacing: 0; }
+  .hud .trio .value { font-size: 16px; letter-spacing: 0; }
+  /* 24 px, а не больше: очки доходят до семи знаков, и это уже 108 px из 112. */
+  .hud .value { font-size: 24px; font-weight: bold; margin-bottom: 14px; }
+  /* 20 px: самое длинное здесь — комбо вида «x5 (23)», это 91 px. Символьные
+     строки (♥, ◆, ?) не ограничены по числу, поэтому переносить им не запрещаем:
+     запасы растут без потолка, и десять бомб должны уйти на вторую строку, а не
+     за край. */
+  .hud .value.small { font-size: 20px; }
   /* Спрятана по умолчанию, показывается клавишей 0. Стоит последней в панели,
      поэтому отступ сверху, а не отрицательный — прежний подтягивал её к строке
      этапа, под которой она когда-то стояла. */
