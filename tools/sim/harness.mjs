@@ -69,6 +69,10 @@ export function boot(seed = 1) {
     get lap() { return lap; },
     get stageSpawned() { return stageSpawned; },
     get poolDry() { return poolDry; },
+    // Техническая сводка: показана ли, что с ней в разметке и что в ней написано.
+    get rulesShown() { return showRules; },
+    get rulesDisplay() { return el.rules.style.display; },
+    get rulesText() { return el.rules.innerHTML; },
     // Ровно то, что видит игрок в панели: круг, этап и слова этапа. Стенду нужны
     // они, а не пересчёт по состоянию, — иначе проверялась бы копия формулы, а не
     // то, что на экране. Склеено через «·» просто чтобы было чем разбирать.
@@ -118,12 +122,12 @@ export function boot(seed = 1) {
     getBoundingClientRect: () => ({ left: 0, top: 0, width: 470, height: 660 }),
   };
   const document = {
-    getElementById: () => ({ textContent: "", innerHTML: "" }),
+    getElementById: () => ({ textContent: "", innerHTML: "", style: {} }),
     querySelectorAll: () => [],
     addEventListener: noop,
   };
   document.getElementById = id =>
-    id === "game" ? canvas : { textContent: "", innerHTML: "" };
+    id === "game" ? canvas : { textContent: "", innerHTML: "", style: {} };
   const window = { devicePixelRatio: 1, addEventListener: noop };
   const localStorage = {
     getItem: k => (store.has(k) ? store.get(k) : null),

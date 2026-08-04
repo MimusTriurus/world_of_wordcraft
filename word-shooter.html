@@ -55,7 +55,11 @@
   .hud .trio .label { font-size: 10px; letter-spacing: 0; }
   .hud .value { font-size: 20px; font-weight: bold; margin-bottom: 7px; }
   .hud .value.small { font-size: 15px; }
-  .hud .rules { font-size: 10px; line-height: 1.4; opacity: .75; margin: -6px 0 8px; }
+  /* Спрятана по умолчанию, показывается клавишей 0. Стоит последней в панели,
+     поэтому отступ сверху, а не отрицательный — прежний подтягивал её к строке
+     этапа, под которой она когда-то стояла. */
+  .hud .rules { display: none; font-size: 10px; line-height: 1.4; opacity: .75;
+                margin: 10px 0 0; }
   .msg { margin-top: auto; font-size: 11px; line-height: 1.5; min-height: 62px; }
   .lang {
     margin-top: 8px;
@@ -103,7 +107,6 @@
         <div><div class="label">ЭТАП</div><div class="value small" id="stage">1/3</div></div>
         <div><div class="label">СЛОВА</div><div class="value small" id="words">0/10</div></div>
       </div>
-      <div class="rules" id="rules"></div>
       <div class="label">COMBO</div><div class="value small" id="combo">x1</div>
       <div class="label">LIVES</div><div class="value small" id="lives">♥♥♥</div>
       <div class="label">BOMBS</div><div class="value small" id="bombs">◆◆◆</div>
@@ -114,6 +117,10 @@
         <button data-lang="ru">RU</button>
         <button data-lang="en">EN</button>
       </div>
+      <!-- Техническая сводка: из чего сейчас складывается сложность. Спрятана и
+           стоит последней — в игре она не нужна, нужна при разборе баланса.
+           Показывается клавишей 0, см. showRules. -->
+      <div class="rules" id="rules"></div>
     </div>
   </div>
   <div class="hint">
@@ -127,7 +134,7 @@
     <b>ПКМ</b> — выстрел подсказкой: толкование слова (1 подсказка)<br>
     Снесённое слово этапу не засчитывается — придёт другое<br>
     Буквами стреляй сколько нужно · обойма пуста, её наполняешь между этапами ·
-    <kbd>Esc</kbd> — пауза
+    <kbd>Esc</kbd> — пауза · <kbd>0</kbd> — техническая сводка
   </div>
 </div>
 
@@ -12500,6 +12507,9 @@
   // обычный "play" — иначе пришлось бы объяснять новое состояние всем, кто
   // смотрит на state, а отличается демо не правилами, а тем, что его никто не
   // просил и никуда не записывают.
+  // Показывать ли техническую сводку в панели. Клавиша 0, между сессиями не
+  // запоминается: это отладочный взгляд, а не настройка игры.
+  let showRules = false;
   let attract = false;
   // Открыто ли меню — отдельно от state, и вот почему. Демо под меню
   // продолжает идти, а идущее демо само меняет state: пересекло границу этапа —
@@ -14491,7 +14501,10 @@
     el.tips.textContent = mods.freeTips ? "∞" : ("?".repeat(tips) || "—");
     el.shells.textContent = String(shells);
 
-    // из чего сейчас складывается сложность
+    // Из чего сейчас складывается сложность. Спрятано за клавишей 0: игроку это
+    // не нужно, а при разборе баланса нужно всё сразу. Пока скрыто — не собираем.
+    el.rules.style.display = showRules ? "block" : "none";
+    if (!showRules) return;
     const r = rules();
     el.rules.innerHTML = `${r.name}` +
       (mods.theme ? `<br>тема: ${THEME_NAMES[mods.theme]}` : "") +
@@ -14528,6 +14541,13 @@
 
   document.addEventListener("keydown", e => {
     if (e.ctrlKey || e.altKey || e.metaKey) return;
+
+    // Ноль работает везде и раньше всех остальных правил: в меню, в игре, на
+    // паузе, в раздаче и в демо. Иначе в демо он начинал бы забег вместе с
+    // «любой кнопкой», а сводку тогда нельзя было бы посмотреть именно там, где
+    // она интереснее всего. Цифра ни с чем не спорит: меню цифр не слушает, в
+    // раздаче заняты 1–3, буквой ноль не бывает.
+    if (e.key === "0") { e.preventDefault(); showRules = !showRules; syncHud(); return; }
 
     // Демо перехватывает всё до остальных правил: пока оно идёт, клавиши не
     // управляют игрой, а выходят из него. Но не когда поверх открыто меню —
