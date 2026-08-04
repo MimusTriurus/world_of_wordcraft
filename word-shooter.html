@@ -61,23 +61,8 @@
   .hud .rules { display: none; font-size: 10px; line-height: 1.4; opacity: .75;
                 margin: 10px 0 0; }
   .msg { margin-top: auto; font-size: 11px; line-height: 1.5; min-height: 62px; }
-  .lang {
-    margin-top: 8px;
-    display: flex;
-    gap: 4px;
-  }
-  .lang button {
-    flex: 1;
-    font: inherit;
-    font-size: 11px;
-    padding: 4px 0;
-    border: 1.5px solid var(--lcd-ink);
-    background: transparent;
-    color: var(--lcd-ink);
-    border-radius: 3px;
-    cursor: pointer;
-  }
-  .lang button.on { background: var(--lcd-ink); color: var(--lcd-bg); }
+  /* Кнопок RU/EN в панели больше нет: язык живёт в модификаторах, вместе с
+     остальными настройками забега. Панель — про то, что происходит сейчас. */
   .hint {
     margin-top: 12px;
     text-align: center;
@@ -113,10 +98,6 @@
       <div class="label">ПОДСКАЗКИ</div><div class="value small" id="tips">?????</div>
       <div class="label">СНАРЯДЫ</div><div class="value small" id="shells">6</div>
       <div class="msg" id="msg"></div>
-      <div class="lang">
-        <button data-lang="ru">RU</button>
-        <button data-lang="en">EN</button>
-      </div>
       <!-- Техническая сводка: из чего сейчас складывается сложность. Спрятана и
            стоит последней — в игре она не нужна, нужна при разборе баланса.
            Показывается клавишей 0, см. showRules. -->
@@ -13371,11 +13352,13 @@
   const stockUp = () => SUPPLIES.forEach(stock);
   const stockLine = () => SUPPLIES.map(s => s.got).join("<br>");
 
+  // Сообщения «+3 снаряда» после выбора здесь нет намеренно: игрок только что
+  // сам ткнул в эту строку, а прибавку видно в кошельке справа. Надпись лишь
+  // затирала то, что стояло в панели до раздачи, — правила начавшегося этапа,
+  // которые как раз и надо прочесть. Вспышка остаётся: она говорит «принято».
   function takeSupply(i) {
-    const s = SUPPLIES[i];
-    stock(s);
+    stock(SUPPLIES[i]);
     state = "play";
-    setMsg(s.got);
     flash = 0.6;
     syncHud();
   }
@@ -14679,12 +14662,13 @@
     return null;
   }
 
-  // Язык меняется и кнопками в панели, и пунктом меню — путь один на обоих.
-  // Партия при этом сбрасывается: словарь под ней меняется целиком.
+  // Язык меняется только пунктом «Язык» в модификаторах: там же, где тема,
+  // части речи и стартовый круг, — это настройка забега, а не показание панели.
+  // Кнопок RU/EN в панели больше нет, и вместе с ними ушла syncLangButtons.
+  // Партия сбрасывается: словарь под ней меняется целиком.
   function setLang(next) {
     lang = next;
     localStorage.setItem("ws-lang", lang);
-    syncLangButtons();
     const wasInMods = inMenu && menu.screen === "mods";
     reset();
     // курсор возвращаем на сам пункт «Язык», а не на фиксированный индекс:
@@ -14692,15 +14676,6 @@
     if (wasInMods) {
       menu.screen = "mods";
       menu.index = Math.max(0, SCREENS.mods.findIndex(it => it.label === "Язык"));
-    }
-  }
-
-  for (const btn of document.querySelectorAll(".lang button")) {
-    btn.addEventListener("click", () => { setLang(btn.dataset.lang); btn.blur(); });
-  }
-  function syncLangButtons() {
-    for (const btn of document.querySelectorAll(".lang button")) {
-      btn.classList.toggle("on", btn.dataset.lang === lang);
     }
   }
 
@@ -15255,7 +15230,6 @@
     requestAnimationFrame(frame);
   }
 
-  syncLangButtons();
   startAttract();          // открытая игра начинает играть сама, см. startAttract
   requestAnimationFrame(frame);
 })();
