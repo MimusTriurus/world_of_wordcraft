@@ -103,6 +103,8 @@
     </div>
   </div>
   <div class="hint">
+    Сразу после загрузки играет <b>демо</b>: любая кнопка начинает свой забег,
+    <kbd>Esc</kbd> открывает меню<br>
     В меню: <kbd>↑</kbd> <kbd>↓</kbd> и <kbd>Enter</kbd> или мышь<br>
     В игре: <b>мышь</b> наводит пушку (или <kbd>←</kbd> <kbd>→</kbd>),
     печатай <b>недостающую букву</b> — встанет сама<br>
@@ -12477,6 +12479,23 @@
   let stage, stageSpawned, poolDry;   // номер этапа, сколько он выпустил, кончились ли слова
   let lap;                            // круг: пройдя все этапы, забег идёт заново
   let spawnTimer, state, shake, flash;
+
+  // Аттракт-режим: игра, открытая и брошенная, играет сама. state при этом
+  // обычный "play" — иначе пришлось бы объяснять новое состояние всем, кто
+  // смотрит на state, а отличается демо не правилами, а тем, что его никто не
+  // просил и никуда не записывают.
+  let attract = false;
+  // Открыто ли меню — отдельно от state, и вот почему. Демо под меню
+  // продолжает идти, а идущее демо само меняет state: пересекло границу этапа —
+  // "draft", потеряло жизни — "over". Пока «меню открыто» означало state ===
+  // "ready", первая же граница этапа стирала меню из-под рук игрока. Теперь
+  // state отвечает за мир, а inMenu — за то, что нарисовано поверх.
+  let inMenu = false;
+  let attractT = 0;              // часы мигания приглашения
+  let attractDead = 0;           // сколько демо стоит на GAME OVER перед перезапуском
+  const ATTRACT_LAP = 3;         // круг, с которого начинается демо
+  const ATTRACT_CLASS = "быстрый";   // демо должно выглядеть умелым
+  const ATTRACT_RESTART = 2.5;   // с — пауза на GAME OVER, чтобы его успели прочесть
   const SPAWN_GAP = 600;         // мс между блоками — антизалп
   const SPAWN_RETRY = 200;       // мс до следующей попытки, если места нет
   let cannonX, cooldown;
@@ -12681,7 +12700,7 @@
   // модификаторов. Там послабление, но игрок сыграл сам, поэтому выкидывать
   // строку нечестно. Здесь играл не он — записывать нечего.
   function recordRun() {
-    if (mods.autopilot) return -1;
+    if (mods.autopilot || attract) return -1;
     const row = { v: BEST_VER, score, lap, stage: stage + 1, solved, lang,
                   easy: mods.freeTips || mods.lap > 1 };
     records.push(row);
@@ -12816,7 +12835,8 @@
   // того круга, с которого игрок собрался стартовать.
   function pickLap(n) {
     mods.lap = n;
-    if (state === "ready") lap = n;
+    // Круг не правим, пока за меню идёт демо: это его круг, а не будущего забега.
+    if (state === "ready" && !attract) lap = n;
     saveMods(); syncHud();
   }
 
@@ -12851,6 +12871,9 @@
       case "Escape":
         if (menu.screen === "mods") backToRoot("Модификаторы");
         else if (menu.screen === "best") backToRoot("Рекорды");
+        // С корневого экрана Escape возвращает туда, откуда пришёл: к демо,
+        // если оно идёт позади. Симметрия с тем, как в меню и попали.
+        else if (attract) inMenu = false;
         break;
       default: return false;
     }
@@ -12859,8 +12882,12 @@
 
   function toMenu() {
     menu.screen = "root"; menu.index = 0; menu.open = null;
-    state = "ready";
-    setMsg("↑ ↓ и ENTER<br>или мышь");
+    inMenu = true;
+    // Мир останавливаем только если за меню ничего не идёт. Демо продолжает
+    // играть под открытым меню — свой state оно ведёт само.
+    if (!attract) state = "ready";
+    setMsg(attract ? "Демо играет за меню.<br>ESC — назад к нему."
+                   : "↑ ↓ и ENTER<br>или мышь");
   }
 
   function reset(startNow) {
@@ -12874,6 +12901,10 @@
     used.clear(); dropBag();
     spawnTimer = 400;
     autopilot = null;              // память о блоках и кости — на один забег
+    // Единственное место, где демо гасится. Иначе его пришлось бы гасить в
+    // каждой двери наружу — в языке, в старте забега, — и одну бы забыли:
+    // приглашение осталось бы мигать поверх игры и глотать нажатия.
+    attract = false; attractDead = 0; inMenu = false;
     shake = 0; flash = 0;
     cannonX = W / 2; cooldown = 0;
     held.left = held.right = false;
@@ -12890,6 +12921,41 @@
     }
     syncHud();
   }
+
+  // Демо. Начинается сразу после загрузки и играет, пока не тронут управление.
+  //
+  // Круг третий, а не первый: демо должно показывать игру, а не её разминку. На
+  // первом круге поле почти пустое, и со стороны кажется, что игры нет.
+  // Модификаторы игрока демо уважает, а mods.lap не трогает — круг задаётся
+  // здесь, поверх забега, чтобы настройки остались настройками.
+  function startAttract() {
+    // Открытое меню переживает перезапуск демо: игрок листает рекорды, а позади
+    // один забег бота сменяется другим — его меню при этом закрываться не должно.
+    const keepMenu = inMenu;
+    reset(true);                 // reset гасит attract и меню, включаем после
+    attract = true;
+    inMenu = keepMenu;
+    attractT = 0; attractDead = 0;
+    lap = ATTRACT_LAP;
+    // Сид берётся у часов, а не у Math.random: из Math.random игра тянет спавн,
+    // позиции пропусков и тасовку пула, и один лишний бросок сдвинул бы весь
+    // забег. В браузере это было бы незаметно, но стенды в Node поднимают тот же
+    // код, и там сдвиг испортил бы все замеры. То же правило, что и для костей
+    // самого бота, — см. botRandom.
+    autopilot = makeAutopilot({ seed: Date.now() & 0x7fffffff,
+                                cls: ATTRACT_CLASS });
+    setMsg(`ДЕМО · КРУГ ${lap}<br>Играет автопилот.<br>` +
+           `Нажми любую кнопку,<br>чтобы играть самому.`);
+    syncHud();
+  }
+
+  // Выход из демо. Любая кнопка начинает забег, Escape открывает меню: иначе
+  // рекорды и модификаторы стали бы недостижимы с холодного запуска.
+  //
+  // В меню демо НЕ гасится: toMenu только поднимает меню поверх, а забег бота
+  // доигрывает позади. Меню кроет полосу экрана на 92%, так что сверху и снизу
+  // видно, что игра живёт.
+  const leaveAttract = toMenuInstead => toMenuInstead ? toMenu() : reset(true);
 
   // ---------------------------------------------------------------- сложность
   // Забег — три этапа, идущих строго по очереди. Этапы не смешиваются: новый
@@ -13621,6 +13687,15 @@
     if (lives <= 0) {
       state = "over";
       const place = recordRun();
+      // Демо перезапускается само, но не отсюда: reset посреди обхода blocks
+      // подменил бы массив под ногами цикла, и уцелевшие блоки старого забега
+      // успели бы отнять жизни у нового. Перезапуск ждёт следующего кадра.
+      if (attract) {
+        setMsg("ДЕМО · GAME OVER<br>Круг " + lap + "<br>Очки: " + score +
+               "<br>Слов: " + solved);
+        syncHud();
+        return;
+      }
       setMsg("GAME OVER<br>Круг " + lap + ", этап " + (stage + 1) +
              "<br>Очки: " + score + "<br>Слов: " + solved +
              (place >= 0 ? "<br>РЕКОРД №" + (place + 1) : "") +
@@ -13794,12 +13869,54 @@
 
     drawCannon();
 
-    if (state === "ready") drawMenu();
-    if (state === "draft") drawDraft();
+    if (inMenu) drawMenu();
+    if (state === "draft" && !inMenu) drawDraft();
     if (state === "pause") banner("PAUSE", "ESC — продолжить");
-    if (state === "over")  banner("GAME OVER", "круг " + lap + " · ENTER — в меню");
+    // Под открытым меню ни баннер демо, ни приглашение не рисуем: меню кроет
+    // середину экрана, они бы столкнулись, а игрок и без приглашения уже здесь.
+    if (state === "over" && !inMenu) banner("GAME OVER", attract
+      ? "демо · круг " + lap : "круг " + lap + " · ENTER — в меню");
+    // На раздаче приглашение молчит: там сейчас выбирает бот, и это интереснее.
+    if (attract && !inMenu && state !== "draft") drawAttract();
 
     ctx.restore();
+  }
+
+  // Приглашение аттракт-режима. Мигает жёстко, а не плавно: так мигали
+  // сегментные индикаторы автоматов, и на ЖК-экране это единственное честное
+  // мигание — плавное выглядело бы подсветкой, которой у такого экрана нет.
+  //
+  // Подложка нужна: надпись висит поверх падающих блоков, и без неё монохромный
+  // текст на монохромном тексте не читается. Выделено рамкой, а не цветом, —
+  // цветом на этом экране помечено только испорченное слово.
+  //
+  // Место выбрано между строк: ниже линии гибели нельзя (там пушка со стволом и
+  // подписью последнего выстрела, от 600 до 654), поэтому надпись стоит ВЫШЕ
+  // линии, а мелкая строка — ровно в просвете под ней.
+  const ATTRACT_BLINK = 1.4;      // с, период мигания
+  const ATTRACT_DUTY = 0.62;      // доля периода, когда надпись видна
+  function drawAttract() {
+    const big = "НАЖМИ ЛЮБУЮ КНОПКУ";
+    const small = "ДЕМО · ИГРАЕТ АВТОПИЛОТ · ESC — МЕНЮ";
+    ctx.textAlign = "center";
+    ctx.font = "bold 17px 'Courier New', monospace";
+    const bw = Math.min(W - 20, ctx.measureText(big).width + 34), bh = 34;
+    const bx = (W - bw) / 2, by = DANGER_Y - 14 - bh;
+
+    if ((attractT % ATTRACT_BLINK) / ATTRACT_BLINK < ATTRACT_DUTY) {
+      ctx.fillStyle = "#9ead86";
+      ctx.fillRect(bx, by, bw, bh);
+      ctx.strokeStyle = INK;
+      ctx.lineWidth = 2;
+      ctx.strokeRect(bx + 1, by + 1, bw - 2, bh - 2);
+      ctx.fillStyle = INK;
+      ctx.fillText(big, W / 2, by + bh / 2 + 6);
+    }
+
+    // мелкая строка не мигает: она объясняет, а объяснение мигать не должно
+    ctx.font = "11px 'Courier New', monospace";
+    ctx.fillStyle = "rgba(43,49,34,.75)";
+    ctx.fillText(small, W / 2, DANGER_Y + 12);
   }
 
   function drawBlock(b, isTarget) {
@@ -14013,7 +14130,10 @@
     ctx.fillStyle = INK;
     ctx.font = "12px 'Courier New', monospace";
     const hint = items[menu.index].hint;
-    const lines = hint ? hint.split("<br>") : ["↑ ↓ — выбор · ENTER — применить"];
+    // Пришли из демо — надо сказать, чем вернуться: Escape не угадывается сам.
+    const lines = hint ? hint.split("<br>")
+                : [attract ? "↑ ↓ — выбор · ENTER — применить · ESC — к демо"
+                           : "↑ ↓ — выбор · ENTER — применить"];
     lines.forEach((line, i) =>
       ctx.fillText(line, W / 2, menuTop() + items.length * MENU_STEP + 14 + i * 15));
 
@@ -14347,7 +14467,7 @@
       // уменьшение читалось бы сбоем.
       `<br>зачтено ${Math.min(stageSpawned, r.quota)}/${r.quota}` +
       (needsAim() ? `<br>прицел по букве` : "") +
-      (mods.autopilot ? `<br>автопилот` : "") +
+      (attract ? `<br>демо` : mods.autopilot ? `<br>автопилот` : "") +
       `<br>скорость ${Math.round(speedNow())}` +
       // Плотность растёт через круг наравне со скоростью, поэтому и показана
       // рядом с ней: иначе половина прибавок происходила бы молча.
@@ -14361,11 +14481,25 @@
   }
 
   // ---------------------------------------------------------------- ввод
+  // Голые модификаторы кнопкой не считаются: Shift, нажатый по дороге к мыши,
+  // не должен запускать забег вместо игрока.
+  const BARE_MODS = ["Shift", "Control", "Alt", "Meta", "CapsLock", "Tab"];
+
   document.addEventListener("keydown", e => {
     if (e.ctrlKey || e.altKey || e.metaKey) return;
 
+    // Демо перехватывает всё до остальных правил: пока оно идёт, клавиши не
+    // управляют игрой, а выходят из него. Но не когда поверх открыто меню —
+    // там клавиши принадлежат меню, а демо просто идёт позади.
+    if (attract && !inMenu) {
+      if (BARE_MODS.includes(e.key)) return;
+      e.preventDefault();
+      leaveAttract(e.key === "Escape");
+      return;
+    }
+
     // в меню Escape отдан навигации: он возвращает из модификаторов
-    if (state === "ready") {
+    if (inMenu) {
       if (menuKey(e)) e.preventDefault();
       return;
     }
@@ -14415,8 +14549,13 @@
   };
 
   canvas.addEventListener("pointermove", e => {
+    // Пушкой в демо распоряжается автопилот: иначе мышь, лежащая на холсте,
+    // тянула бы её к себе и демо выглядело бы сломанным. Выход из демо — по
+    // нажатию, а не по движению: случайно задетая мышь не должна начинать забег.
+    // Под открытым меню мышь снова нужна — она водит по пунктам.
+    if (attract && !inMenu) return;
     const p = canvasPos(e);
-    if (state === "ready") {                 // в меню мышь водит по пунктам
+    if (inMenu) {                            // в меню мышь водит по пунктам
       if (menu.open) {
         const k = dropAt(p.x, p.y);
         if (k !== -1) menu.opt = k;
@@ -14438,7 +14577,8 @@
   // ЛКМ — выстрел по блоку на линии огня, ПКМ — выстрел подсказкой
   canvas.addEventListener("pointerdown", e => {
     e.preventDefault();
-    if (state === "ready") {
+    if (attract && !inMenu) { leaveAttract(false); return; }  // клик — тоже кнопка
+    if (inMenu) {
       const p = canvasPos(e);
       if (menu.open) {                       // клик мимо списка — закрыть
         const k = dropAt(p.x, p.y);
@@ -14484,7 +14624,7 @@
     lang = next;
     localStorage.setItem("ws-lang", lang);
     syncLangButtons();
-    const wasInMods = state === "ready" && menu.screen === "mods";
+    const wasInMods = inMenu && menu.screen === "mods";
     reset();
     // курсор возвращаем на сам пункт «Язык», а не на фиксированный индекс:
     // список модификаторов растёт, и номер пункта в нём не константа
@@ -14695,6 +14835,11 @@
     const K = Object.assign({}, BOT_KNOBS, knobs);
     const P = Object.assign({}, BOT_POLICY, policy);
     const rnd = botRandom(seed);
+    // У раздачи свой генератор. Тот же довод, что и для Math.random, на шаг
+    // внутрь: rnd тратится на время извлечения слова и на подсказки, и один
+    // лишний бросок на границе круга сдвигал бы всю дальнейшую игру. Замерено —
+    // сдвигал: у среднего +0.4% превратилось в +5.3% от одной этой связи.
+    const draftRnd = botRandom((seed ^ 0x5bf03635) >>> 0);
     const salt = (seed * 2654435761) >>> 0;
 
     const known = w => {
@@ -14703,7 +14848,10 @@
     };
 
     const mem = new Map();          // блок -> что бот про него помнит
-    const stats = { shells: 0, bombs: 0, hints: 0, guesses: 0, hopeless: 0 };
+    // upgrades — названия взятых за круг правил. Нужны стендам: пул из
+    // тринадцати заглушек иначе никак не проверить на то, что он весь выбирается.
+    const stats = { shells: 0, bombs: 0, hints: 0, guesses: 0, hopeless: 0,
+                    upgrades: [] };
     let busy = 0;
 
     const openOf = v => v.gaps.filter(i => !v.shown[i]);
@@ -14786,8 +14934,46 @@
       return { kind: "guess", cost: readTime(view, cands, cands[0]) };
     }
 
-    function pickDraft() {
-      if (draft.kind === "upgrade") { takePick(0); return; }
+    // Раздача идёт в два приёма, и это не украшательство. Бот выбирал в тот же
+    // кадр, в котором экран открылся, поэтому экрана никто не видел: ни игрок в
+    // режиме автопилота, ни зритель демо. Сперва бот «читает» список, потом
+    // наводит курсор на выбранную строку, потом подтверждает.
+    //
+    // Игровому времени это ничего не стоит: на раздаче update() возвращается
+    // сразу, мир стоит. Плата только кадрами, и замеры от неё не меняются.
+    const DRAFT_LOOK = 0.55;      // с — сколько бот смотрит на список
+    const DRAFT_TAKE = 1.3;       // с — когда подтверждает выбор
+    let draftT = 0, draftPick = -1;
+
+    function draftStep(dt) {
+      draftT += dt;
+      if (draftPick === -1 && draftT >= DRAFT_LOOK) {
+        draftPick = decideDraft();
+        draft.index = draftPick;      // курсор виден: он и есть «бот выбирает»
+      }
+      if (draftPick !== -1 && draftT >= DRAFT_TAKE) {
+        if (draft.kind === "upgrade") stats.upgrades.push(draft.cards[draftPick].name);
+        takePick(draftPick);
+        draftT = 0; draftPick = -1;
+      }
+    }
+
+    function decideDraft() {
+      // Улучшение за круг. Выбирать по существу НЕ ИЗ ЧЕГО: все тринадцать
+      // правил в UPGRADES — заглушки, они запоминаются и показываются в HUD, но
+      // ничего не меняют. Значит любая «стратегия выбора» тут была бы фикцией:
+      // бот делал бы вид, что взвешивает эффекты, которых нет.
+      //
+      // Поэтому берём случайное из предложенных — костями раздачи, не общими.
+      // Слепое takePick(0) тем и плохо, что за забег бот брал одно и то же и
+      // пул из тринадцати правил не проверялся вовсе; стенды теперь видят все.
+      // Когда у улучшений появятся эффекты, здесь появится и политика — и её
+      // сразу можно будет сравнить с этим случайным выбором как с нулевой
+      // линией.
+      if (draft.kind === "upgrade") {
+        return Math.min(draft.cards.length - 1,
+                        Math.floor(draftRnd() * draft.cards.length));
+      }
       let i = { shells: 0, bombs: 1, tips: 2 }[P.draft] || 0;
       if (P.draft === "need") {
         // Только то, чем политика разрешает пользоваться: иначе выключенный
@@ -14797,7 +14983,7 @@
         i = can.findIndex((ok, k) => ok && want[k]);
         if (i === -1) i = Math.max(0, can.findIndex(Boolean));
       }
-      takePick(i);
+      return i;
     }
 
     function act() {
@@ -14937,7 +15123,8 @@
     return {
       stats,
       tick(dt) {
-        if (state === "draft") { pickDraft(); return; }   // раздача морозит игру
+        if (state === "draft") { draftStep(dt); return; }   // раздача морозит игру
+        draftT = 0; draftPick = -1;      // экран закрылся — часы выбора заново
         if (state !== "play") return;
 
         // Пушка в пути. Рука едет со своей скоростью, и это не только вид: пока
@@ -14975,8 +15162,24 @@
   function frame(now) {
     const dt = Math.min((now - last) / 1000, 0.05);   // защита от долгих пауз вкладки
     last = now;
-    if (mods.autopilot) {
-      if (!autopilot) autopilot = makeAutopilot({ seed: (Math.random() * 1e9) | 0 });
+
+    // Часы мигания идут в кадре, а не в update: update молчит на GAME OVER, а
+    // приглашение мигать обязано и там.
+    if (attract) {
+      attractT += dt;
+      // Демо кончилось — постоять на GAME OVER и начать заново. Перезапуск
+      // здесь, а не в loseLife: там reset подменил бы массив блоков под ногами
+      // цикла, который его обходит.
+      // Выходить из кадра здесь нельзя: за return остался бы
+      // requestAnimationFrame, и цикл бы встал.
+      if (state === "over") {
+        attractDead += dt;
+        if (attractDead > ATTRACT_RESTART) startAttract();
+      }
+    }
+
+    if (attract || mods.autopilot) {
+      if (!autopilot) autopilot = makeAutopilot({ seed: Date.now() & 0x7fffffff });
       autopilot.tick(dt);
     }
     update(dt);
@@ -14985,7 +15188,7 @@
   }
 
   syncLangButtons();
-  reset();
+  startAttract();          // открытая игра начинает играть сама, см. startAttract
   requestAnimationFrame(frame);
 })();
 </script>
