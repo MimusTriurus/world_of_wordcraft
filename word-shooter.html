@@ -48,6 +48,11 @@
     flex-direction: column;
   }
   .hud .label { opacity: .6; }
+  /* Ряд «круг · этап · слова»: три колонки по содержимому, метка над числом.
+     Метки здесь без разрядки и мельче — иначе «СЛОВА» не влезает в колонку. */
+  .hud .trio { display: flex; gap: 7px; }
+  .hud .trio > div { white-space: nowrap; }
+  .hud .trio .label { font-size: 10px; letter-spacing: 0; }
   .hud .value { font-size: 20px; font-weight: bold; margin-bottom: 7px; }
   .hud .value.small { font-size: 15px; }
   .hud .rules { font-size: 10px; line-height: 1.4; opacity: .75; margin: -6px 0 8px; }
@@ -88,8 +93,16 @@
     <canvas id="game"></canvas>
     <div class="hud">
       <div class="label">SCORE</div><div class="value" id="score">0</div>
-      <!-- третье поле — сколько слов осталось до конца этапа, см. syncHud -->
-      <div class="label">КРУГ · ЭТАП · СЛОВ</div><div class="value" id="level">1·1/3·10</div>
+      <!-- Три колонки, а не одна строка с разделителями: метка должна стоять
+           ровно над своим числом. Одной строкой «КРУГ · ЭТАП · СЛОВА» не влезает
+           в панель на 112 px и переносится так, что «СЛОВА» оказывается под
+           «КРУГ». Ширины здесь по содержимому — в худшем случае 10 знаков
+           значений плюс просветы, это 104 px. -->
+      <div class="trio">
+        <div><div class="label">КРУГ</div><div class="value small" id="lap">1</div></div>
+        <div><div class="label">ЭТАП</div><div class="value small" id="stage">1/3</div></div>
+        <div><div class="label">СЛОВА</div><div class="value small" id="words">0/10</div></div>
+      </div>
       <div class="rules" id="rules"></div>
       <div class="label">COMBO</div><div class="value small" id="combo">x1</div>
       <div class="label">LIVES</div><div class="value small" id="lives">♥♥♥</div>
@@ -12462,7 +12475,9 @@
 
   const el = {
     score: document.getElementById("score"),
-    level: document.getElementById("level"),
+    lap:   document.getElementById("lap"),
+    stage: document.getElementById("stage"),
+    words: document.getElementById("words"),
     combo: document.getElementById("combo"),
     lives: document.getElementById("lives"),
     bombs: document.getElementById("bombs"),
@@ -14450,24 +14465,24 @@
   function syncHud() {
     el.score.textContent = score;
 
-    // Сколько слов осталось до конца этапа: те, что этап ещё не выпустил, плюс
-    // те, что уже на поле. Этап кончается не на последнем выпущенном слове, а
-    // когда поле опустеет (stageDone), поэтому «выпущено N/квота» на вопрос
-    // «сколько осталось» не отвечало — оно отвечало на «сколько уже вышло».
+    // Слова этапа — дробью, как этапы круга: сколько уже отработано из всех.
+    // Отработанное это выпущенные минус те, что ещё в воздухе: этап кончается не
+    // на последнем выпущенном слове, а когда поле опустеет (stageDone).
     //
-    // Снос слова это число НЕ уменьшает, и так и надо: снесённое этапу не
+    // Снос слова счётчик НЕ двигает, и так и надо: снесённое этапу не
     // засчитывается, квота возвращается, и этап должен слово заново. Со стороны
-    // это читается как «снёс, а легче не стало» — ровно то, чем снос и является.
+    // это читается как «снёс, а ближе к концу не стало» — ровно то, чем снос и
+    // является.
     //
     // Пул мог кончиться раньше квоты (узкая тема): тогда этап закроется на том,
-    // что уже в воздухе, и обещать ненаступающие слова нельзя.
+    // что уже в воздухе, и знаменатель надо считать по факту, а не по квоте.
     const onField = blocks.filter(alive).length;
     const q = rules().quota;
-    const left = poolDry ? onField
-               : Math.max(0, q - Math.min(stageSpawned, q)) + onField;
-    // Разделители без пробелов: три поля с пробелами не влезают в панель на
-    // 112 px — «10 · 2/3 · 18» это 117 px при 20 px Courier.
-    el.level.textContent = `${lap}·${stage + 1}/${STAGES.length}·${left}`;
+    const out = Math.min(stageSpawned, q);
+    const total = poolDry ? out : q;
+    el.lap.textContent = String(lap);
+    el.stage.textContent = `${stage + 1}/${STAGES.length}`;
+    el.words.textContent = `${Math.max(0, out - onField)}/${total}`;
 
     el.combo.textContent = "x" + Math.min(1 + Math.floor(combo / 5), 5) +
                            (combo > 1 ? " (" + combo + ")" : "");
