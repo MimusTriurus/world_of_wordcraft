@@ -59,8 +59,7 @@
      поэтому отступ сверху, а не отрицательный — прежний подтягивал её к строке
      этапа, под которой она когда-то стояла. */
   .hud .rules { display: none; font-size: 10px; line-height: 1.4; opacity: .75;
-                margin: 10px 0 0; }
-  .msg { margin-top: auto; font-size: 11px; line-height: 1.5; min-height: 62px; }
+                margin: auto 0 0; }
   /* Кнопок RU/EN в панели больше нет: язык живёт в модификаторах, вместе с
      остальными настройками забега. Панель — про то, что происходит сейчас. */
   .hint {
@@ -97,7 +96,6 @@
       <div class="label">BOMBS</div><div class="value small" id="bombs">◆◆◆</div>
       <div class="label">ПОДСКАЗКИ</div><div class="value small" id="tips">?????</div>
       <div class="label">СНАРЯДЫ</div><div class="value small" id="shells">6</div>
-      <div class="msg" id="msg"></div>
       <!-- Техническая сводка: из чего сейчас складывается сложность. Спрятана и
            стоит последней — в игре она не нужна, нужна при разборе баланса.
            Показывается клавишей 0, см. showRules. -->
@@ -12472,7 +12470,6 @@
     tips:  document.getElementById("tips"),
     shells: document.getElementById("shells"),
     rules: document.getElementById("rules"),
-    msg:   document.getElementById("msg"),
   };
 
   // ------------------------------------------------------------------ стейт
@@ -12506,7 +12503,6 @@
   const SPAWN_GAP = 600;         // мс между блоками — антизалп
   const SPAWN_RETRY = 200;       // мс до следующей попытки, если места нет
   let cannonX, cooldown;
-  let lastKey = null, lastKeyOk = false, lastKeyAt = 0;
   const held = { left: false, right: false };
 
   const CANNON_SPEED = 300;      // px/s
@@ -12572,16 +12568,14 @@
   // автовыдачу, теперь запас приходит только раздачей, и «взял снаряды, а их
   // не прибавилось» было бы обманом.
   //
-  // got — та же порция словами. Отдельным полем, а не сборкой из n и label:
-  // «+1 бомбы» по-русски не говорят, а склонять число в коде ради трёх
-  // постоянных строк не стоит. Что got и n не разошлись, проверяет стенд.
+  // Поля got («+3 снаряда») здесь больше нет: оно жило ради надписи после
+  // выбора и строки за пройденный круг, а обе убраны. Порция и так стоит на
+  // карточке раздачи — «+3» справа, — то есть игрок видит её ДО выбора, а не
+  // после, что и лучше.
   const SUPPLIES = [
-    { key: "shells", label: "СНАРЯДЫ",   n: 3, got: "+3 снаряда",
-      note: "ЛКМ сносит блок целиком" },
-    { key: "bombs",  label: "БОМБЫ",     n: 1, got: "+1 бомба",
-      note: "пробел очищает поле" },
-    { key: "tips",   label: "ПОДСКАЗКИ", n: 2, got: "+2 подсказки",
-      note: "ПКМ читает толкование" },
+    { key: "shells", label: "СНАРЯДЫ",   n: 3, note: "ЛКМ сносит блок целиком" },
+    { key: "bombs",  label: "БОМБЫ",     n: 1, note: "пробел очищает поле" },
+    { key: "tips",   label: "ПОДСКАЗКИ", n: 2, note: "ПКМ читает толкование" },
   ];
 
   // Заглушка под мету. Свойства слотов, открываемые между забегами, будут
@@ -12656,10 +12650,9 @@
   const loadMul  = () => 1 + lapSteps().load * LAP_LOAD;
   const loadNow  = r => r.load * loadMul();
 
-  // Что прибавил переход именно на этот круг. Нечётная прибавка — плотность.
-  const lapGrowth = () => (lap - 1) % 2 === 1
-    ? `Слов на поле +${Math.round(LAP_LOAD * 100)}%`
-    : `Скорость ${speedNow()}`;
+  // lapGrowth («Слов на поле +30%» / «Скорость 22») убран вместе с надписью за
+  // пройденный круг. Что именно прибавилось, видно в технической сводке по
+  // клавише 0: там стоят и скорость, и плотность.
 
   // Скорость первого круга — точка отсчёта для оплаты слов, см. wordScore.
   const SPEED_PAR = BASE_SPEED;
@@ -12893,8 +12886,6 @@
     // Мир останавливаем только если за меню ничего не идёт. Демо продолжает
     // играть под открытым меню — свой state оно ведёт само.
     if (!attract) state = "ready";
-    setMsg(attract ? "Демо играет за меню.<br>ESC — назад к нему."
-                   : "↑ ↓ и ENTER<br>или мышь");
   }
 
   function reset(startNow) {
@@ -12916,8 +12907,6 @@
     cannonX = W / 2; cooldown = 0;
     held.left = held.right = false;
     if (startNow) {
-      setMsg((lap > 1 ? `КРУГ ${lap}<br>` : "") + STAGES[0].name +
-             "<br>Наведи пушку<br>и печатай букву.");
       // Раздача до первого падающего слова, а не после первого этапа.
       // Иначе слабый игрок теряет жизнь раньше, чем получает право выбрать:
       // у медленного на первом этапе портится ровно одно слово за забег, и
@@ -12951,8 +12940,6 @@
     // самого бота, — см. botRandom.
     autopilot = makeAutopilot({ seed: Date.now() & 0x7fffffff,
                                 cls: ATTRACT_CLASS });
-    setMsg(`ДЕМО · КРУГ ${lap}<br>Играет автопилот.<br>` +
-           `Нажми любую кнопку,<br>чтобы играть самому.`);
     syncHud();
   }
 
@@ -13281,7 +13268,6 @@
   // true — снаряд списан и стрелять можно.
   function spendShell() {
     if (shells <= 0) {
-      setMsg("Снаряды кончились!<br>Их даёт только<br>решённое слово.");
       shake = 5;
       return false;
     }
@@ -13294,7 +13280,6 @@
     if (cooldown > 0 || shots.length >= MAX_SHOTS) return;
 
     cooldown = SHOT_COOLDOWN;
-    lastKey = letter; lastKeyAt = performance.now(); lastKeyOk = null;
     shots.push({ letter, x: cannonX, y: CANNON_Y - 14 });
     syncHud();
   }
@@ -13350,7 +13335,6 @@
 
   // Полная порция каждого слота разом — награда за круг, без выбора.
   const stockUp = () => SUPPLIES.forEach(stock);
-  const stockLine = () => SUPPLIES.map(s => s.got).join("<br>");
 
   // Сообщения «+3 снаряда» после выбора здесь нет намеренно: игрок только что
   // сам ткнул в эту строку, а прибавку видно в кошельке справа. Надпись лишь
@@ -13367,7 +13351,6 @@
     const u = draft.cards[i];
     taken.add(u.id);              // эффекта пока нет: правила ещё заглушки
     state = "play";
-    setMsg(`${u.name}<br>${u.note}`);
     flash = 1;
     syncHud();
   }
@@ -13416,7 +13399,7 @@
   const CLEAR_COST = 1;          // бомб за зачистку поля
 
   // Общая часть обоих сносов. Оплату делает вызывающий: она у них разная.
-  function destroy(victims, what) {
+  function destroy(victims) {
     const wide = victims.length > 1;
     combo = 0;
     for (const b of victims) {
@@ -13443,7 +13426,6 @@
     }
     shake = wide ? 18 : 9;
     flash = wide ? 1 : 0;
-    setMsg(what);
     syncHud();
   }
 
@@ -13454,10 +13436,10 @@
   function shootBlock() {
     if (state !== "play" || cooldown > 0) return;
     const victim = blockInLine();
-    if (!victim) { setMsg("На линии огня<br>пусто."); return; }
+    if (!victim) return;
     if (!spendShell()) return;
     cooldown = SHOT_COOLDOWN;
-    destroy([victim], "Сбито: слово<br>не засчитано.");
+    destroy([victim]);
     reveal(victim);
   }
 
@@ -13502,21 +13484,23 @@
   function hint() {
     if (state !== "play") return;
     const b = blockInLine();
-    if (!b) { setMsg("На линии огня<br>пусто."); return; }
-    if (b.broken) { setMsg("Слово испорчено:<br>подсказка не поможет."); shake = 4; return; }
+    if (!b) return;
+    if (b.broken) { shake = 4; return; }
     if (hints.some(h => h.block === b)) return;          // уже висит
     const text = glossOf(b.word);
     if (!text || !glossTells(text)) {
-      setMsg("Толкования нет<br>для этого слова."); shake = 4; return;
+      shake = 4; return;
     }
     if (!mods.freeTips && tips < HINT_COST) {
-      setMsg("Подсказки кончились!"); shake = 4; return;
+      shake = 4; return;
     }
 
     if (!mods.freeTips) tips -= HINT_COST;
     const lines = wrapText(text, HINT_W - 20);
     hints.push({ block: b, lines, t: HINT_BASE + lines.length * HINT_PER_LINE });
-    setMsg(mods.freeTips ? "Подсказка" : "Подсказка:<br>осталось " + tips);
+    // «Подсказка: осталось 3» отсюда убрано — того же рода эхо, что «+3 снаряда»:
+    // толкование уже выехало карточкой на поле, а остаток стоит в кошельке.
+    // Отказы выше остаются: они объясняют, почему ничего не произошло.
     syncHud();
   }
 
@@ -13553,24 +13537,24 @@
   function dropBomb() {
     if (state !== "play") return;
     const victims = blocks.filter(alive);
-    if (!victims.length) { setMsg("Поле и так<br>пустое."); return; }
-    if (bombs < CLEAR_COST) { setMsg("Бомбы кончились!"); shake = 4; return; }
+    if (!victims.length) return;
+    if (bombs < CLEAR_COST) { shake = 4; return; }
     bombs -= CLEAR_COST;
-    destroy(victims, "Зачистка: снесено<br>слов — " + victims.length);
+    destroy(victims);
     shots.length = 0;
   }
 
   // Буква попала в пропуск и подошла. Слово с двумя пропусками так
   // закрывается в два выстрела, и очки за него идут только целиком.
+  //
+  // «Есть! Осталось: N» отсюда убрано: буква встаёт в блок у игрока на глазах, а
+  // сколько пропусков осталось, видно в самом слове. Надпись пересказывала экран
+  // и на каждом выстреле затирала правила этапа.
   function fill(b, i, letter) {
-    lastKeyOk = true;
     b.shown[i] = letter;
     filterOptions(b);
     burst(b, 6);
-    if (b.shown.some(ch => !ch)) {         // остались пропуски
-      setMsg("Есть!<br>Осталось: " + b.shown.filter(ch => !ch).length);
-      return;
-    }
+    if (b.shown.some(ch => !ch)) return;    // остались пропуски
     solve(b);
   }
 
@@ -13616,27 +13600,30 @@
     b.strikes++;
     const i = cell !== -1 ? cell : b.gaps.find(g => !b.shown[g]);
     if (b.strikes < STRIKES_TO_BREAK || i === undefined) {
-      miss(b, "Не подходит:");
+      miss(b);
       return;
     }
     b.shown[i] = letter;
     b.wrong.add(i);
     b.broken = true;
     burst(b, 10);
-    miss(b, "Слово испорчено:");
+    miss(b);
   }
 
-  // буква прилетела в блок, но не подошла
-  function miss(b, why) {
-    lastKeyOk = false;
+  // Буква прилетела в блок, но не подошла.
+  //
+  // Надписи здесь нет намеренно. Она пересказывала то, что и так на экране:
+  // шаблон стоит в самом блоке, а о промахе говорят три вещи разом — тряска,
+  // блок вздрагивает (hurt) и ✕ у пушки. Строка панели при этом затиралась на
+  // каждом выстреле, так что правила этапа, выставленные при его начале,
+  // доживали до первого промаха.
+  //
+  // Параметр why убран вместе с ней: мёртвый аргумент, который все вызывающие
+  // продолжают заполнять, гниёт быстрее, чем находится.
+  function miss(b) {
     combo = 0;
     shake = Math.max(shake, 7);
-    if (b) {
-      b.hurt = 0.35;
-      // показываем шаблон, а не загаданное слово — иначе промах выдаёт ответ
-      setMsg(why + "<br>" +
-        b.shown.map(ch => ch ? ch.toUpperCase() : "_").join(""));
-    }
+    if (b) b.hurt = 0.35;
     syncHud();
   }
 
@@ -13650,10 +13637,6 @@
     stage++;
     stageSpawned = 0; poolDry = false;
     dropBag();
-    const r = rules();
-    setMsg(`ЭТАП ${stage + 1}/${STAGES.length}<br>${r.name}<br>` +
-           `${lenLabel(r)} букв · ${r.gaps} ` +
-           (r.gaps === 1 ? "пропуск" : r.gaps < 5 ? "пропуска" : "пропусков"));
     flash = 1;
     syncHud();
     openDraft(`ЭТАП ${stage} ПРОЙДЕН`);   // stage уже увеличен, пройден предыдущий
@@ -13682,7 +13665,6 @@
     // бы один снаряд там, где обычный этап платит три, — большее достижение
     // дешевле меньшего.
     stockUp();
-    setMsg(`КРУГ ${lap}<br>${lapGrowth()}<br>` + stockLine());
     flash = 1;
     syncHud();
     openUpgrade(`КРУГ ${lap - 1} ПРОЙДЕН`);
@@ -13695,22 +13677,12 @@
     lives--; combo = 0; shake = 16;
     if (lives <= 0) {
       state = "over";
-      const place = recordRun();
+      // Забег записывается здесь, и результат вызова больше никуда не идёт:
+      // «РЕКОРД №2» показывать негде, место видно в таблице рекордов.
+      recordRun();
       // Демо перезапускается само, но не отсюда: reset посреди обхода blocks
       // подменил бы массив под ногами цикла, и уцелевшие блоки старого забега
       // успели бы отнять жизни у нового. Перезапуск ждёт следующего кадра.
-      if (attract) {
-        setMsg("ДЕМО · GAME OVER<br>Круг " + lap + "<br>Очки: " + score +
-               "<br>Слов: " + solved);
-        syncHud();
-        return;
-      }
-      setMsg("GAME OVER<br>Круг " + lap + ", этап " + (stage + 1) +
-             "<br>Очки: " + score + "<br>Слов: " + solved +
-             (place >= 0 ? "<br>РЕКОРД №" + (place + 1) : "") +
-             "<br>ENTER — заново");
-    } else {
-      setMsg("Пропущено:<br>" + b.word.toUpperCase());
     }
     syncHud();
   }
@@ -13776,14 +13748,14 @@
         if (s.y > b.y + b.h || s.y < b.y) continue;
 
         // в испорченное слово уже ничего не вставить — только снести
-        if (b.broken) { miss(b, "Слово испорчено:"); return true; }
+        if (b.broken) { miss(b); return true; }
 
         // Пока точный прицел не включён, хватает попадания в блок: буква сама
         // встаёт в подходящий пропуск. С b.aim целиться нужно в саму ячейку.
         // Промах по букве наводки — не ошибка знания, за неё блок не портим.
         const aimed = b.aim ? cellAt(b, s.x) : -1;
         if (b.aim && (aimed === -1 || b.shown[aimed])) {
-          miss(b, aimed === -1 ? "Мимо буквы:" : "Тут уже<br>есть буква:");
+          miss(b);
           return true;
         }
 
@@ -13793,7 +13765,7 @@
         return true;
       }
 
-      if (s.y < -20) { miss(null, ""); return true; }   // ушёл в молоко
+      if (s.y < -20) { miss(null); return true; }   // ушёл в молоко
     }
     return false;
   }
@@ -13906,7 +13878,6 @@
   const ATTRACT_DUTY = 0.62;      // доля периода, когда надпись видна
   function drawAttract() {
     const big = "НАЖМИ ЛЮБУЮ КНОПКУ";
-    const small = "ДЕМО · ИГРАЕТ АВТОПИЛОТ · ESC — МЕНЮ";
     ctx.textAlign = "center";
     ctx.font = "bold 17px 'Courier New', monospace";
     const bw = Math.min(W - 20, ctx.measureText(big).width + 34), bh = 34;
@@ -13921,11 +13892,9 @@
       ctx.fillStyle = INK;
       ctx.fillText(big, W / 2, by + bh / 2 + 6);
     }
-
-    // мелкая строка не мигает: она объясняет, а объяснение мигать не должно
-    ctx.font = "11px 'Courier New', monospace";
-    ctx.fillStyle = "rgba(43,49,34,.75)";
-    ctx.fillText(small, W / 2, DANGER_Y + 12);
+    // Пояснения «ДЕМО · ИГРАЕТ АВТОПИЛОТ · ESC — МЕНЮ» здесь больше нет: что
+    // идёт демо, видно по тому, что оно играет само, а про Escape написано в
+    // подсказке под экраном. Мигающего приглашения на экране достаточно.
   }
 
   function drawBlock(b, isTarget) {
@@ -14080,17 +14049,10 @@
     // лафет
     ctx.fillRect(-20, 6, 40, 8);
     ctx.restore();
-
-    // итог последнего выстрела: пока летит — просто буква, потом ✓ или ✕
-    if (lastKey && performance.now() - lastKeyAt < 700) {
-      ctx.globalAlpha = 1 - (performance.now() - lastKeyAt) / 700;
-      ctx.font = "bold 15px 'Courier New', monospace";
-      ctx.textAlign = "center";
-      ctx.fillStyle = INK;
-      const mark = lastKeyOk === true ? " ✓" : lastKeyOk === false ? " ✕" : "";
-      ctx.fillText(lastKey.toUpperCase() + mark, cannonX, CANNON_Y + 28);
-      ctx.globalAlpha = 1;
-    }
+    // Буквы с ✓ или ✕ под пушкой больше нет. Она пересказывала то, что и так
+    // происходит на глазах: буква летит на экране, попадание видно по тому, что
+    // она встала в слово, промах — по тряске и вздрогнувшему блоку. Вместе с ней
+    // ушли lastKey, lastKeyAt и lastKeyOk: состояние жило только ради неё.
   }
 
   const MENU_TITLES = { root: "WORD SHOOTER", mods: "МОДИФИКАТОРЫ", best: "РЕКОРДЫ" };
@@ -14454,7 +14416,6 @@
   }
 
   // -------------------------------------------------------------------- HUD
-  function setMsg(html) { el.msg.innerHTML = html; }
   function syncHud() {
     el.score.textContent = score;
 
@@ -14557,8 +14518,8 @@
 
     if (e.key === "Escape") {
       e.preventDefault();
-      if (state === "play") { state = "pause"; setMsg("Пауза"); }
-      else if (state === "pause") { state = "play"; setMsg(""); }
+      if (state === "play") { state = "pause"; }
+      else if (state === "pause") { state = "play"; }
       return;
     }
 
