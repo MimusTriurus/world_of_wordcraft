@@ -12643,7 +12643,7 @@
   // freeAmmo убран вместе с платой за буквы: он ровно её и отменял. В новом
   // смысле он давал бы бесконечные сносы, то есть снимал бы условие поражения.
   const mods = { aim: false, verbs: false, adjs: false, theme: "",
-                 freeTips: false, lap: 1 };
+                 freeTips: false, lap: 1, autopilot: false };
   try { Object.assign(mods, JSON.parse(localStorage.getItem("ws-mods") || "{}")); }
   catch { /* испорченная запись — играем с настройками по умолчанию */ }
   if (mods.theme && !THEME_NAMES[mods.theme]) mods.theme = "";   // тема из старой сборки
@@ -12676,7 +12676,12 @@
   } catch { /* испорченная запись — начинаем таблицу заново */ }
 
   // Возвращает место в таблице (0-based) или -1, если забег в неё не попал.
+  //
+  // Забег автопилота не попадает вовсе, и это не то же самое, что звёздочка у
+  // модификаторов. Там послабление, но игрок сыграл сам, поэтому выкидывать
+  // строку нечестно. Здесь играл не он — записывать нечего.
   function recordRun() {
+    if (mods.autopilot) return -1;
     const row = { v: BEST_VER, score, lap, stage: stage + 1, solved, lang,
                   easy: mods.freeTips || mods.lap > 1 };
     records.push(row);
@@ -12722,6 +12727,11 @@
         value: () => mods.adjs ? "вкл" : "выкл",
         hint: "Добавить прилагательные:<br>КРА_НЫЙ, БЫС_РЫЙ",
         act: () => { mods.adjs = !mods.adjs; saveMods(); dropBag(); syncHud(); } },
+      { label: "Автопилот",
+        value: () => mods.autopilot ? "вкл" : "выкл",
+        hint: "Играет бот. В таблицу рекордов<br>такой забег не попадает",
+        act: () => { mods.autopilot = !mods.autopilot; autopilot = null;
+                     saveMods(); syncHud(); } },
       { label: "Бесконечные подсказки",
         value: () => mods.freeTips ? "вкл" : "выкл",
         hint: "ПКМ показывает толкование<br>без траты запаса",
@@ -12863,6 +12873,7 @@
     lap = mods.lap;
     used.clear(); dropBag();
     spawnTimer = 400;
+    autopilot = null;              // память о блоках и кости — на один забег
     shake = 0; flash = 0;
     cannonX = W / 2; cooldown = 0;
     held.left = held.right = false;
@@ -13392,6 +13403,27 @@
   const HINT_W = 260;
   const glossOf = w => GLOSS[lang][w] || "";
 
+  // Говорит ли толкование хоть что-нибудь. Однокоренные слова в статьях затёрты
+  // многоточием, чтобы подсказка не выдавала ответ, и у части статей после
+  // затирания не остаётся содержания вовсе: «действие по значению гл. …, …»
+  // подходит к тысяче слов. Таких 146 из 4509 русских толкований — 3.2%.
+  //
+  // Правило у игры уже есть: за подсказку, которой нет, плату не берём. Пустая
+  // статья — тот же случай, только замеченный позже. Проверка нарочно строгая:
+  // ложно отвергнуть годное толкование хуже, чем пропустить пустое, а короткие
+  // статьи вроде «век — столетие» толкуют слово прекрасно.
+  const GLOSS_FRAMES = [
+    /^действие по значению гл\.?/i, /^состояние по значению/i,
+    /^свойство по значению/i, /^результат действия по значению/i,
+    /^страд\. прич\./i, /^то же, что/i, /^уменьш\.-ласк\. к/i,
+  ];
+  function glossTells(text) {
+    let s = text;
+    for (const f of GLOSS_FRAMES) s = s.replace(f, " ");
+    s = s.replace(/…/g, " ").replace(/[^а-яёa-z\s-]/gi, " ");
+    return s.split(/\s+/).some(w => w.length > 3);
+  }
+
   function hint() {
     if (state !== "play") return;
     const b = blockInLine();
@@ -13399,7 +13431,9 @@
     if (b.broken) { setMsg("Слово испорчено:<br>подсказка не поможет."); shake = 4; return; }
     if (hints.some(h => h.block === b)) return;          // уже висит
     const text = glossOf(b.word);
-    if (!text) { setMsg("Толкования нет<br>для этого слова."); shake = 4; return; }
+    if (!text || !glossTells(text)) {
+      setMsg("Толкования нет<br>для этого слова."); shake = 4; return;
+    }
     if (!mods.freeTips && tips < HINT_COST) {
       setMsg("Подсказки кончились!"); shake = 4; return;
     }
@@ -14313,6 +14347,7 @@
       // уменьшение читалось бы сбоем.
       `<br>зачтено ${Math.min(stageSpawned, r.quota)}/${r.quota}` +
       (needsAim() ? `<br>прицел по букве` : "") +
+      (mods.autopilot ? `<br>автопилот` : "") +
       `<br>скорость ${Math.round(speedNow())}` +
       // Плотность растёт через круг наравне со скоростью, поэтому и показана
       // рядом с ней: иначе половина прибавок происходила бы молча.
@@ -14468,11 +14503,482 @@
     }
   }
 
+  // ---------------------------------------------------------------- автопилот
+  // Бот, играющий в игру теми же кнопками, что человек: shootLetter,
+  // shootBlock, dropBomb, hint, takePick. Он и демо-режим, и измерительный
+  // прибор — тот же код крутится в tools/ai на Node. Числа и оговорки:
+  // docs/ai.md.
+  //
+  // ПОЧЕМУ ОН ЖИВЁТ ЗДЕСЬ, А НЕ В tools/. Две копии ядра решений разъехались бы
+  // в первую же правку, и Node мерил бы не то, что играет человек. Стенд умеет
+  // поднимать настоящий скрипт из этого файла, поэтому канонической копией
+  // выбрана игровая, а tools/ai читает её отсюда. Внешних зависимостей это не
+  // добавляет: файл по-прежнему открывается двойным щелчком.
+  //
+  // ГЛАВНОЕ ОГРАНИЧЕНИЕ. Игра принимает в пропуск любую букву, дающую слово
+  // корпуса: замерено, что options после filterOptions — это ровно все слова
+  // корпуса по видимому шаблону. Бот, знающий корпус, решает 100% слов, так что
+  // содержательная часть здесь — модель НЕзнания, а не решатель. Поэтому поле
+  // бот видит только через botSee(): загаданного слова и options в проекции нет.
+  //
+  // Незнание собрано из двух частей: словарный запас отвечает, может ли игрок
+  // решить слово вообще, время извлечения — успеет ли он до линии.
+
+  // Проекция блока в видимое — единственный законный вход бота в поле.
+  // needsAim блок запоминает при рождении, поэтому и бот читает правило у него,
+  // а не у модификаторов: блок, взлетевший при старых правилах, посреди полёта
+  // точного прицела не потребует.
+  const botSee = b => ({
+    ref: b, shown: b.shown.slice(), gaps: b.gaps.slice(), len: b.shown.length,
+    broken: b.broken, strikes: b.strikes, aim: b.aim,
+    x: b.x, y: b.y, w: b.w, h: b.h, speed: b.speed,
+  });
+
+  // Кости бота — отдельный генератор. Math.random занят: из него игра тянет
+  // спавн, позиции пропусков и тасовку пула, и лишний бросок бота сдвинул бы
+  // весь забег. Тогда замер зависел бы от того, сколько раз бот сомневался.
+  function botRandom(seed) {
+    let a = (seed ^ 0x9e3779b9) >>> 0;
+    return () => {
+      a = (a + 0x6d2b79f5) | 0;
+      let t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  // Хэш слова в [0,1): словарный запас должен быть свойством игрока, а не
+  // броском. Человек не забывает слово между двумя взглядами на один блок.
+  function botHash(str, salt) {
+    let h = (2166136261 ^ salt) >>> 0;
+    for (let i = 0; i < str.length; i++) {
+      h ^= str.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    h ^= h >>> 15; h = Math.imul(h, 2246822507);
+    h ^= h >>> 13; h = Math.imul(h, 3266489909);
+    return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+  }
+
+  // Темп взят у прежнего модельного игрока, чтобы числа стояли рядом со
+  // старыми. vocab — сколько частотного списка игрок узнаёт, в рангах корпуса
+  // (всего 32147 слов).
+  //
+  // КАЛИБРОВАНО tools/ai/calibrate.mjs по прежней модели, восстановленной в
+  // tools/ai/legacy.mjs. Сравнение честное только теми же руками, что были у
+  // неё: без подсказок, без бомб, без догадок, в раздаче всегда снаряды.
+  // Решённых слов на 16 сидах:
+  //
+  //   класс       прежняя  бот   откл    16 сидов
+  //   быстрый      71.3    71.4  +0.1%
+  //   средний      47.1    47.3  +0.4%
+  //   медленный    17.9    19.1  +6.7%
+  //
+  // Словарь подбирался каждому классу отдельно: общий множитель на все три не
+  // сходился нигде, потому что врал не уровень, а разброс между классами.
+  //
+  // ЭТИ ЧИСЛА ЗАВИСЯТ ОТ ПОВЕДЕНИЯ БОТА, а не только от игры, и это выяснилось
+  // дорого: две правки самого бота сдвинули калибровку на 8–13%, и словарь
+  // приходилось перебирать заново. Плавная пушка добавила отмену выстрела в
+  // изменившееся поле (clearShot), бот перестал сам себе ломать слова, и
+  // медленному словарь урезали с 11000. Наводка в саму ячейку сделала точку
+  // прицела хрупче к движению соседей, и среднему словарь подняли с 20000.
+  // Правило простое: тронул решения бота — перепроверь калибровку.
+  //
+  // Медленный держится хуже прочих, и это не лень. Он живёт на самом краю —
+  // круг 1, — поэтому у него и кривая крутая (9000 → 16.3 слова, 11000 → 21), и
+  // разброс по сидам того же порядка, что подгоняемое отклонение: на 12 сидах те
+  // же 9250 дают +1.1%, на 16 уже +6.7%. Загонять точнее значило бы подгонять
+  // под шум.
+  const BOT_CLASSES = {
+    быстрый:   { pace: 2.5, vocab: 28000 },
+    средний:   { pace: 3.5, vocab: 21000 },
+    медленный: { pace: 4.5, vocab: 9250 },
+  };
+
+  // Из всех ручек калибровка двигала только READ_MUL. Остальные — предположения,
+  // и врать об этом не надо: свипы по ним не прогонялись.
+  const BOT_KNOBS = {
+    SHARP: 2.4,        // резкость границы словаря: p = 1 / (1 + (ранг/vocab)^SHARP)
+    READ_MUL: 1.2,     // во сколько темпов обходится взгляд на блок — калибровано
+    GAP_W: 0.55,       // насколько дороже каждый пропуск сверх первого
+    FITS_W: 0.45,      // насколько легче слово с многими подходящими буквами
+    RANK_W: 0.35,      // насколько дольше извлекается редкое слово, на порядок ранга
+    SPREAD: 0.4,       // разброс времени извлечения вокруг среднего
+    // Скорость руки на мыши, px/s — не рельс клавиатуры (CANNON_SPEED = 300):
+    // мышь в игре мгновенна, а рука человека нет. Пушка едет с этой скоростью в
+    // реальном времени, а не переставляется с оплатой задним числом.
+    //
+    // ОШИБКИ НАВОДКИ У БОТА НЕТ, и это его слепое пятно. За наводку он платит
+    // только временем, а попадает всегда туда, куда целился, — поэтому режим
+    // «Прицел по букве» он играет ЛУЧШЕ, чем обычный (средний 56.4 слова против
+    // 48.1 на 16 сидах), тогда как человеку тот же режим добавляет требование к
+    // точности. Целиться в ячейку бот умеет, но его числа в этом режиме о
+    // сложности режима не говорят ничего; чтобы говорили, руке нужен разброс.
+    AIM_SPEED: 900,
+    REACT: 0.3,        // реакция на кнопку, не требующую чтения
+    TYPE: 0.35,        // цена одного нажатия: клавиша плюс возврат глаза
+    // Помогает ли толкование узнать слово. НЕ ИЗМЕРЕНО, и вывод о ценности
+    // подсказок висит на этом числе: по всей области значений забег среднего
+    // ходит от 43.4 до 52.2 решённых слов. См. docs/ai.md.
+    HINT_HELPS: 0.75,
+  };
+
+  // Политики траты. Смысл в том, чтобы их можно было менять и сравнивать:
+  // прежняя модель бомб и подсказок не касалась вовсе.
+  //
+  // ОБА ЗНАЧЕНИЯ НИЖЕ ЗАМЕРЕНЫ НА ВСЕХ ТРЁХ КЛАССАХ, и это не педантизм: сперва
+  // они были выставлены по одному среднему игроку, и порог бомбы оказался
+  // выставлен неверно — на трёх классах вывод перевернулся. Одного класса мало.
+  //
+  // bomb = false. Бомба не окупается ни при каком пороге. При пороге от двух
+  // блоков и выше она не тратится ни разу за забег — кошелёк мёртв. При пороге
+  // в один блок она тратится, приносит быстрому +8 слов, и всем трём классам
+  // роняет очки, потому что снос обнуляет комбо. Очки, 12 сидов:
+  //
+  //              порог 1   не бомбить
+  //   быстрый     153298     173199
+  //   средний      57055      93007
+  //   медленный    11418      14990
+  //
+  // При bomb = false раздача бомб не предлагает вовсе (см. pickDraft), так что
+  // слот не съедает выбор. Это же и ответ на вопрос, зачем бомба в игре:
+  // заявленной роли «ответ на давление» бот не находит ни разу.
+  //
+  // guess = false. Право на бесплатную первую догадку не окупается: промах
+  // сжигает комбо, и по очкам это дорого — у среднего 93007 против 49321. По
+  // числу решённых слов медленный от догадок выигрывает (23.9 против 21.1), но
+  // очки — метрика самой игры, и по ней проигрывают все три класса.
+  const BOT_POLICY = {
+    guess: false, hint: true, shell: true, bomb: false, draft: "need",
+    urgent: 3.5,
+  };
+
+  // Позиционная частота букв — чем бот руководствуется, когда слова не знает.
+  // Это языковое чутьё, а не знание слова, поэтому считается по всему корпусу,
+  // а не по списку кандидатов, до которого боту дотягиваться нельзя.
+  const botBg = new Map();
+  function botBackground(len, pos) {
+    const key = lang + len;
+    if (!botBg.has(key)) {
+      const table = [];
+      for (const w of BY_LEN[lang].get(len) || [])
+        for (let i = 0; i < len; i++) {
+          table[i] = table[i] || new Map();
+          table[i].set(w[i], (table[i].get(w[i]) || 0) + 1);
+        }
+      botBg.set(key, table.map(m => [...m.entries()].sort((a, b) => b[1] - a[1])));
+    }
+    const col = botBg.get(key)[pos];
+    return col ? col.map(e => e[0]) : [];
+  }
+
+  // Все слова корпуса по видимому шаблону. То же, что игра держит в options, но
+  // посчитанное самостоятельно из видимого, а не подсмотренное.
+  const botCands = new Map();
+  function botCandidates(view) {
+    const key = lang + "|" + view.shown.map(c => c || "_").join("");
+    let out = botCands.get(key);
+    if (out) return out;
+    out = [];
+    for (const w of BY_LEN[lang].get(view.len) || [])
+      if (view.shown.every((ch, i) => !ch || w[i] === ch)) out.push(w);
+    botCands.set(key, out);
+    return out;
+  }
+
+  // par перекрывает темп и словарь поверх класса: этим калибровка подбирает
+  // словарь каждому классу отдельно, не трогая таблицу.
+  function makeAutopilot({ seed = 1, cls = "средний",
+                           knobs = {}, policy = {}, par: over = {} } = {}) {
+    const par = Object.assign({}, BOT_CLASSES[cls] || BOT_CLASSES["средний"], over);
+    const K = Object.assign({}, BOT_KNOBS, knobs);
+    const P = Object.assign({}, BOT_POLICY, policy);
+    const rnd = botRandom(seed);
+    const salt = (seed * 2654435761) >>> 0;
+
+    const known = w => {
+      const pk = 1 / (1 + Math.pow(rankOf(w) / par.vocab, K.SHARP));
+      return botHash(w, salt) < pk;
+    };
+
+    const mem = new Map();          // блок -> что бот про него помнит
+    const stats = { shells: 0, bombs: 0, hints: 0, guesses: 0, hopeless: 0 };
+    let busy = 0;
+
+    const openOf = v => v.gaps.filter(i => !v.shown[i]);
+    const tte = v => (DANGER_Y - (v.y + v.h)) / v.speed;
+    const typeTime = len => K.TYPE * (1 + 0.12 * (len - 4));
+
+    // Сколько буква летит до блока. Ждать обязательно: буква встаёт в ПЕРВЫЙ
+    // открытый подходящий пропуск, и пока первая в воздухе, вторая уходит в
+    // него же — слово получает промах, второй промах его ломает. Чем быстрее
+    // игрок, тем чаще он себя так убивал.
+    const flight = v => Math.max(0, (CANNON_Y - 14 - (v.y + v.h)) / SHOT_SPEED);
+    const filled = v => v.gaps.filter(i => v.shown[i]).length;
+
+    function readTime(view, cands, best) {
+      const open = openOf(view).length;
+      const rare = 1 + K.RANK_W *
+        Math.max(0, Math.log10(Math.max(1, rankOf(best)) / 1000));
+      const amb = 1 + K.FITS_W * Math.log2(Math.max(1, cands.length));
+      const mean = par.pace * K.READ_MUL * (1 + K.GAP_W * (open - 1)) * rare / amb;
+      return mean * (1 - K.SPREAD + 2 * K.SPREAD * rnd());
+    }
+
+    // Куда встать пушкой, чтобы попасть именно в этот блок. Выстрел достаётся
+    // самому нижнему блоку колонки, так что по верхнему в занятой колонке
+    // попасть физически нельзя. null — блок сейчас недостижим.
+    //
+    // cell — номер ячейки, если целиться нужно в саму букву. Это режим
+    // «Прицел по букве»: там попадания в блок не хватает, cellAt(b, x) должен
+    // дать именно нужный пропуск. Границы ячейки считаются той же формулой, что
+    // в cellAt, иначе бот целился бы в одно, а игра читала бы другое.
+    // cell = -1 — годится любое место блока (обычный режим, снос, подсказка).
+    function aimAt(view, field, cell = -1) {
+      let lo = Math.max(16, view.x + 3), hi = Math.min(W - 16, view.x + view.w - 3);
+      if (cell >= 0) {
+        const step = (view.w - 26) / view.len;
+        const left = view.x + 13 + cell * step;
+        // отступ внутрь ячейки: на самой границе округление уводит в соседнюю
+        lo = Math.max(lo, left + step * 0.2);
+        hi = Math.min(hi, left + step * 0.8);
+      }
+      if (hi < lo) return null;
+      const below = field.filter(o => o.ref !== view.ref && o.y > view.y);
+      for (let s = 0; s <= 10; s++) {
+        const f = s === 0 ? 0.5 : (s % 2 ? 0.5 - s / 20 : 0.5 + (s - 1) / 20);
+        const x = lo + (hi - lo) * f;
+        if (x < lo || x > hi) continue;
+        if (!below.some(o => x >= o.x && x <= o.x + o.w)) return x;
+      }
+      return null;
+    }
+
+    // Куда бот ведёт пушку и что сделает, когда доведёт. Пушка едет со
+    // скоростью руки, а не переставляется мгновенно: телепорт и выглядел
+    // неправдой, и скрывал, что за наводку платят временем, — плата была, но
+    // списывалась разом, будто рука уже на месте.
+    let aim = null, pending = null;
+
+    // Свободна ли линия огня: между пушкой и блоком не должно быть чужого блока
+    // ниже. Проверяется на прибытии, потому что за время хода поле изменилось.
+    const clearShot = b => alive(b) && b.y + b.h <= CANNON_Y &&
+      cannonX >= b.x && cannonX <= b.x + b.w &&
+      !blocks.some(o => o !== b && alive(o) && o.y > b.y &&
+                        cannonX >= o.x && cannonX <= o.x + o.w);
+
+    // Довести пушку и выстрелить. Если рука уже на месте — сразу.
+    function schedule(x, cost, run, ref) {
+      if (Math.abs(x - cannonX) <= 1) { cannonX = x; run(); busy = cost; return; }
+      aim = x;
+      pending = { cost, run, ref };
+    }
+
+    function think(view) {
+      const cands = botCandidates(view);
+      if (!cands.length) return { kind: "stuck" };
+      const mine = cands.filter(known);
+      if (mine.length) {
+        const best = mine.reduce((a, b) => rankOf(b) <= rankOf(a) ? b : a);
+        return { kind: "plan", word: best, cost: readTime(view, cands, best) };
+      }
+      return { kind: "guess", cost: readTime(view, cands, cands[0]) };
+    }
+
+    function pickDraft() {
+      if (draft.kind === "upgrade") { takePick(0); return; }
+      let i = { shells: 0, bombs: 1, tips: 2 }[P.draft] || 0;
+      if (P.draft === "need") {
+        // Только то, чем политика разрешает пользоваться: иначе выключенный
+        // кошелёк наказывает дважды — стрелять нельзя и выбор съеден.
+        const can = [P.shell, P.bomb !== false, P.hint];
+        const want = [shells === 0, bombs === 0, tips === 0];
+        i = can.findIndex((ok, k) => ok && want[k]);
+        if (i === -1) i = Math.max(0, can.findIndex(Boolean));
+      }
+      takePick(i);
+    }
+
+    function act() {
+      const field = blocks.filter(alive).map(botSee);
+      if (!field.length) { busy = 0.1; return; }
+
+      const burning = field.filter(v => tte(v) < P.urgent);
+      if (P.bomb !== false && bombs > 0 && burning.length >= P.bomb) {
+        dropBomb(); stats.bombs++; busy = K.REACT; return;
+      }
+
+      for (const view of field.slice().sort((a, b) => tte(a) - tte(b))) {
+        const m = mem.get(view.ref) || {};
+        // Безнадёжный блок бот не разгадает, но у линии его надо снести, иначе
+        // он забирает жизнь: «безнадёжный» — это «не разгадаю», а не «не подойду».
+        if (m.hopeless && !view.broken && tte(view) >= P.urgent) continue;
+
+        // Снос и подсказка бьют по блоку целиком, им ячейка не нужна даже в
+        // режиме прицела: blockInLine смотрит только на колонку.
+        const xBlock = aimAt(view, field);
+        if (xBlock === null) continue;
+
+        if (view.broken) {
+          if (P.shell && shells > 0) {
+            schedule(xBlock, K.REACT,
+                     () => { shootBlock(); stats.shells++; }, view.ref);
+            return;
+          }
+          continue;
+        }
+
+        // Ещё не читали — читаем. Это отдельное действие со своей ценой:
+        // человек сперва смотрит на слово, а печатает уже потом.
+        if (!m.read) {
+          const fresh = think(view);
+          mem.set(view.ref, Object.assign({}, m, { read: true, plan: fresh }));
+          busy = fresh.cost || par.pace;
+          return;
+        }
+
+        // Ждали попадания предыдущей буквы. Полёт уже оплачен временем, так что
+        // здесь она должна была долететь; если нет — её перехватил блок,
+        // подъехавший в колонку снизу, и шаблон надо перечитать.
+        if (m.sent !== undefined) {
+          if (filled(view) === m.sent && view.strikes === m.hitAt) {
+            mem.set(view.ref, Object.assign({}, m, { sent: undefined, read: false }));
+            busy = 0.05; return;
+          }
+          delete m.sent;
+        }
+
+        const plan = m.plan;
+
+        // Буква летит в конкретный пропуск, и целиться бот старается в его
+        // ячейку ВСЕГДА, а не только когда этого требует режим прицела.
+        //
+        // Правилам это безразлично: без точного прицела игра сама переложит
+        // букву в первый подходящий пропуск (gapFor). Но целиться в середину
+        // блока значит стрелять в уже заполненную ячейку — замерено, что так
+        // уходило 73% букв, — и со стороны это выглядит как отсутствие наводки:
+        // буква летит мимо дырки, а встаёт в дырку. Человек целится в дырку.
+        //
+        // Разница между режимами остаётся в цене промаха. Если ячейка прикрыта
+        // снизу, при точном прицеле блок недостижим и бот идёт к другому, а без
+        // прицела ему хватит любого места блока.
+        const gap = openOf(view)[0];
+        let xGap = xBlock;
+        if (gap !== undefined) {
+          xGap = aimAt(view, field, gap);
+          if (xGap === null && !view.aim) xGap = xBlock;
+        }
+
+        if (plan.kind === "plan") {
+          if (gap === undefined) { busy = 0.05; return; }
+          if (xGap === null) continue;
+          if (!view.shown.every((ch, i) => !ch || plan.word[i] === ch)) {
+            mem.set(view.ref, Object.assign({}, m, { read: false }));
+            busy = 0.05; return;
+          }
+          mem.set(view.ref, Object.assign({}, m,
+            { sent: filled(view), hitAt: view.strikes }));
+          schedule(xGap, typeTime(view.len) + flight(view),
+                   () => shootLetter(plan.word[gap]), view.ref);
+          return;
+        }
+
+        if (plan.kind === "guess" && P.guess && view.strikes === 0) {
+          if (xGap === null) continue;
+          mem.set(view.ref, Object.assign({}, m,
+            { plan: { kind: "stuck" }, sent: filled(view), hitAt: view.strikes }));
+          schedule(xGap, typeTime(view.len) + flight(view),
+                   () => { shootLetter(botBackground(view.len, gap)[0]);
+                           stats.guesses++; }, view.ref);
+          return;
+        }
+
+        if (P.hint && !m.hinted && (mods.freeTips || tips > 0)) {
+          schedule(xBlock, K.REACT, () => askHint(view, m), view.ref);
+          return;
+        }
+
+        if (P.shell && shells > 0 && tte(view) < P.urgent) {
+          schedule(xBlock, K.REACT,
+                   () => { shootBlock(); stats.shells++; }, view.ref);
+          return;
+        }
+
+        if (!m.hopeless) {
+          mem.set(view.ref, Object.assign({}, m, { hopeless: true }));
+          stats.hopeless++;
+        }
+      }
+      busy = 0.1;
+    }
+
+    // Вынесено из act(), потому что теперь выполняется не сразу, а по прибытии
+    // пушки — и должно читать кошелёк уже после выстрела подсказкой.
+    function askHint(view, m) {
+      const paid = tips;
+      hint();
+      // Подсказку могли и не дать: у слова нет толкования или оно пустое. Тогда
+      // бот ничего не узнал — проверяем по кошельку, а не по намерению. Иначе он
+      // получал бы слово бесплатно там, где игра отказала, и это был бы уже не
+      // замер.
+      const got = mods.freeTips || tips < paid;
+      if (got) stats.hints++;
+      // Толкование показывает смысл, а не буквы: сработало — слово узнано и
+      // дальше собирается как знакомое, не сработало — осталось тёмным.
+      // Заглянуть в загаданное слово здесь можно именно потому, что за это
+      // заплачено подсказкой; в любом другом месте — нельзя.
+      mem.set(view.ref, got && rnd() < K.HINT_HELPS
+        ? Object.assign({}, m, { hinted: true, read: true,
+                                 plan: { kind: "plan", word: view.ref.word } })
+        : Object.assign({}, m, { hinted: true }));
+    }
+
+    return {
+      stats,
+      tick(dt) {
+        if (state === "draft") { pickDraft(); return; }   // раздача морозит игру
+        if (state !== "play") return;
+
+        // Пушка в пути. Рука едет со своей скоростью, и это не только вид: пока
+        // она едет, блоки падают, так что за наводку платится настоящим временем
+        // в настоящей обстановке. Раньше плата списывалась разом, как будто рука
+        // уже на месте, — сумма выходила та же, но выстрел уходил в поле,
+        // которого в момент прицеливания ещё не было.
+        if (aim !== null) {
+          const step = K.AIM_SPEED * dt, d = aim - cannonX;
+          if (Math.abs(d) <= step) {
+            cannonX = aim; aim = null;
+            const p = pending; pending = null;
+            // Пока рука ехала, цель могла погибнуть, уехать за линию или
+            // закрыться блоком, подъехавшим в колонку снизу. Тогда выстрела нет:
+            // человек в такой момент тоже не жмёт.
+            if (p && (!p.ref || clearShot(p.ref))) { p.run(); busy = p.cost; }
+            else busy = 0.05;
+          } else {
+            cannonX = Math.max(16, Math.min(W - 16, cannonX + Math.sign(d) * step));
+          }
+          return;
+        }
+
+        busy -= dt;
+        if (busy <= 0) act();
+      },
+    };
+  }
+
+  // Автопилот пересоздаётся на каждый забег: память о блоках и кости — его.
+  let autopilot = null;
+
   // ---------------------------------------------------------------- цикл
   let last = performance.now();
   function frame(now) {
     const dt = Math.min((now - last) / 1000, 0.05);   // защита от долгих пауз вкладки
     last = now;
+    if (mods.autopilot) {
+      if (!autopilot) autopilot = makeAutopilot({ seed: (Math.random() * 1e9) | 0 });
+      autopilot.tick(dt);
+    }
     update(dt);
     draw();
     requestAnimationFrame(frame);
