@@ -3,3 +3,7 @@ tools/.cache/
 
 # настройки IDE — у каждого свои
 .idea/
+
+# выборка для замера HINT_HELPS: вопросы и ответы к ним, см. docs/ai.md
+tools/ai/quiz.json
+tools/ai/key.json
