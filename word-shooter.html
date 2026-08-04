@@ -124,7 +124,8 @@
     <b>ПКМ</b> — выстрел подсказкой: толкование слова (1 подсказка)<br>
     Снесённое слово этапу не засчитывается — придёт другое<br>
     Буквами стреляй сколько нужно · обойма пуста, её наполняешь между этапами ·
-    <kbd>Esc</kbd> — пауза · <kbd>0</kbd> — техническая сводка
+    <kbd>Esc</kbd> — пауза с меню: модификаторы, рекорды, заново, выход ·
+    <kbd>0</kbd> — техническая сводка
   </div>
 </div>
 
@@ -12496,6 +12497,9 @@
   // обычный "play" — иначе пришлось бы объяснять новое состояние всем, кто
   // смотрит на state, а отличается демо не правилами, а тем, что его никто не
   // просил и никуда не записывают.
+  // Место последнего забега в таблице рекордов, −1 — не попал. Живёт до конца
+  // следующего забега: его показывает экран GAME OVER.
+  let lastPlace = -1;
   // Показывать ли техническую сводку в панели. Клавиша 0, между сессиями не
   // запоминается: это отладочный взгляд, а не настройка игры.
   let showRules = false;
@@ -12723,19 +12727,40 @@
   }
 
   // -------------------------------------------------------------------- меню
-  // open — открытый выпадающий список, opt — подсвеченный в нём пункт
-  const menu = { screen: "root", index: 0, open: null, opt: 0 };
+  // open — открытый выпадающий список, opt — подсвеченный в нём пункт,
+  // home — экран, куда вернёт «Назад». Раньше он всегда вёл в корень, и пауза,
+  // заглянув в модификаторы, теряла забег.
+  const menu = { screen: "root", index: 0, open: null, opt: 0, home: "root" };
+
+  // Уйти на вложенный экран, запомнив, откуда пришли.
+  const openScreen = name => {
+    menu.home = menu.screen; menu.screen = name; menu.index = 0;
+  };
 
   const SCREENS = {
     root: [
       { label: "Начать игру", act: () => reset(true) },
-      { label: "Модификаторы", act: () => { menu.screen = "mods"; menu.index = 0; } },
-      { label: "Рекорды", act: () => { menu.screen = "best"; menu.index = 0; } },
+      { label: "Модификаторы", act: () => openScreen("mods") },
+      { label: "Рекорды", act: () => openScreen("best") },
+    ],
+    // Пауза — то же меню, только поверх незакрытого забега. Отдельным экраном, а
+    // не корневым: из корневого «Начать игру» затирает забег, а с паузы к нему
+    // надо иметь возможность вернуться.
+    pause: [
+      { label: "Продолжить", hint: "ESC — тоже продолжает", act: () => resume() },
+      { label: "Модификаторы",
+        hint: "Настройки применятся к следующему забегу", act: () => openScreen("mods") },
+      { label: "Рекорды", act: () => openScreen("best") },
+      { label: "Начать заново", hint: "Текущий забег пропадёт", act: () => reset(true) },
+      // Выход в демо: меню гасим сами, иначе startAttract сохранит его открытым —
+      // он для случая, когда демо перезапускается под уже открытым меню.
+      { label: "Выйти", hint: "К начальному экрану, там играет бот",
+        act: () => { inMenu = false; startAttract(); } },
     ],
     best: [
       { label: "Назад",
         hint: "Сортировка по очкам.<br>* — забег с модификаторами",
-        act: () => backToRoot("Рекорды") },
+        act: () => backHome("Рекорды") },
     ],
     mods: [
       // Круг задаёт условия всех этапов разом, поэтому стоит первым: это
@@ -12780,19 +12805,29 @@
         value: () => lang.toUpperCase(),
         hint: "Словарь и раскладка",
         act: () => { setLang(lang === "ru" ? "en" : "ru"); } },
-      { label: "Назад", act: () => backToRoot("Модификаторы") },
+      { label: "Назад", act: () => backHome("Модификаторы") },
     ],
   };
 
   const menuItems = () => SCREENS[menu.screen];
 
-  // Курсор возвращаем на тот пункт, из которого ушли, и ищем его по имени:
-  // корневой список растёт, и номер пункта в нём не константа.
-  function backToRoot(label) {
-    menu.screen = "root";
-    menu.index = Math.max(0, SCREENS.root.findIndex(it => it.label === label));
+  // Возвращаемся туда, откуда пришли, — в корень или в паузу. Курсор ставим на
+  // тот пункт, из которого ушли, и ищем его по имени: списки растут, и номер
+  // пункта в них не константа. Имена в корне и в паузе намеренно совпадают.
+  function backHome(label) {
+    menu.screen = SCREENS[menu.home] ? menu.home : "root";
+    menu.index = Math.max(0, menuItems().findIndex(it => it.label === label));
     menu.open = null;
   }
+
+  // Пауза поднимает меню поверх забега; мир стоит, потому что state не "play".
+  function pauseGame() {
+    state = "pause";
+    menu.screen = "pause"; menu.index = 0; menu.open = null; menu.home = "pause";
+    inMenu = true;
+  }
+
+  const resume = () => { inMenu = false; state = "play"; };
 
   // Прямоугольник пункта — общий для отрисовки и попадания мышью.
   const MENU_STEP = 44, MENU_W = 300;
@@ -12880,8 +12915,11 @@
       case "Enter":
       case " ":         items[menu.index].act(); break;
       case "Escape":
-        if (menu.screen === "mods") backToRoot("Модификаторы");
-        else if (menu.screen === "best") backToRoot("Рекорды");
+        if (menu.screen === "mods") backHome("Модификаторы");
+        else if (menu.screen === "best") backHome("Рекорды");
+        // С экрана паузы Escape продолжает забег — тем же нажатием, которым его
+        // и поставили.
+        else if (menu.screen === "pause") resume();
         // С корневого экрана Escape возвращает туда, откуда пришёл: к демо,
         // если оно идёт позади. Симметрия с тем, как в меню и попали.
         else if (attract) inMenu = false;
@@ -12913,7 +12951,7 @@
     // Единственное место, где демо гасится. Иначе его пришлось бы гасить в
     // каждой двери наружу — в языке, в старте забега, — и одну бы забыли:
     // приглашение осталось бы мигать поверх игры и глотать нажатия.
-    attract = false; attractDead = 0; inMenu = false;
+    attract = false; attractDead = 0; inMenu = false; lastPlace = -1;
     shake = 0; flash = 0;
     cannonX = W / 2; cooldown = 0;
     held.left = held.right = false;
@@ -13688,9 +13726,9 @@
     lives--; combo = 0; shake = 16;
     if (lives <= 0) {
       state = "over";
-      // Забег записывается здесь, и результат вызова больше никуда не идёт:
-      // «РЕКОРД №2» показывать негде, место видно в таблице рекордов.
-      recordRun();
+      // Место запоминаем: на экране конца забега своя строка обведена рамкой,
+      // иначе в таблице из десяти строк её пришлось бы искать глазами.
+      lastPlace = recordRun();
       // Демо перезапускается само, но не отсюда: reset посреди обхода blocks
       // подменил бы массив под ногами цикла, и уцелевшие блоки старого забега
       // успели бы отнять жизни у нового. Перезапуск ждёт следующего кадра.
@@ -13863,11 +13901,16 @@
 
     if (inMenu) drawMenu();
     if (state === "draft" && !inMenu) drawDraft();
-    if (state === "pause") banner("PAUSE", "ESC — продолжить");
-    // Под открытым меню ни баннер демо, ни приглашение не рисуем: меню кроет
-    // середину экрана, они бы столкнулись, а игрок и без приглашения уже здесь.
-    if (state === "over" && !inMenu) banner("GAME OVER", attract
-      ? "демо · круг " + lap : "круг " + lap + " · ENTER — в меню");
+    // Вывески «PAUSE» больше нет: пауза поднимает меню, и оно само себя рисует.
+    // Под открытым меню ни конец забега, ни приглашение демо не рисуем: меню
+    // кроет середину экрана, они бы столкнулись.
+    //
+    // Демо обходится короткой вывеской: своих рекордов у него нет, забег бота в
+    // таблицу не идёт, и показывать ему чужую таблицу незачем.
+    if (state === "over" && !inMenu) {
+      if (attract) banner("GAME OVER", "демо · круг " + lap);
+      else drawGameOver();
+    }
     // На раздаче приглашение молчит: там сейчас выбирает бот, и это интереснее.
     if (attract && !inMenu && state !== "draft") drawAttract();
 
@@ -14075,7 +14118,8 @@
     // ушли lastKey, lastKeyAt и lastKeyOk: состояние жило только ради неё.
   }
 
-  const MENU_TITLES = { root: "WORD SHOOTER", mods: "МОДИФИКАТОРЫ", best: "РЕКОРДЫ" };
+  const MENU_TITLES = { root: "WORD SHOOTER", pause: "ПАУЗА",
+                        mods: "МОДИФИКАТОРЫ", best: "РЕКОРДЫ" };
 
   function drawMenu() {
     const items = menuItems();
@@ -14133,6 +14177,50 @@
 
   // Таблица результатов. Колонки выровнены по краям, а не по центру: очки
   // и число слов читаются столбиком только при выключке вправо.
+  // Конец забега. Таблица рекордов здесь потому, что это единственный момент,
+  // когда игроку есть с чем себя сравнить: он только что закончил, и цифра уже
+  // окончательная. Ходить за ней в меню — значит просить сравнить по памяти.
+  //
+  // Своя строка обведена рамкой, а не выделена цветом: красный помечает только
+  // испорченное слово. Если забег в десятку не попал, обводить нечего.
+  function drawGameOver() {
+    const rows = Math.max(1, records.length);
+    const h = 62 + BEST_HEAD + rows * BEST_STEP + 26;
+    const top = Math.max(6, (H - h) / 2);
+    const tableY = top + 62;
+
+    ctx.fillStyle = "rgba(158,173,134,.94)";
+    ctx.fillRect(0, top, W, h);
+    ctx.strokeStyle = INK; ctx.lineWidth = 2;
+    ctx.strokeRect(0, top, W, h);
+
+    // Базовую линию задаём явно: остальные ставят "middle", и без этого экран
+    // съезжал бы в зависимости от того, что рисовалось перед ним.
+    ctx.textBaseline = "middle";
+    ctx.textAlign = "center";
+    ctx.fillStyle = INK;
+    ctx.font = "bold 30px 'Courier New', monospace";
+    ctx.fillText("GAME OVER", W / 2, top + 24);
+    ctx.font = "13px 'Courier New', monospace";
+    ctx.fillText(`круг ${lap} · этап ${stage + 1} · очки ${score} · слов ${solved}`,
+                 W / 2, top + 48);
+
+    drawRecords(tableY);
+
+    if (lastPlace >= 0) {
+      const x = (W - BEST_W) / 2;
+      // Строки рисуются с центром на +16 от своего верха, отсюда и сдвиг рамки.
+      const ry = tableY + BEST_HEAD + lastPlace * BEST_STEP + 16;
+      ctx.strokeStyle = INK; ctx.lineWidth = 2;
+      ctx.strokeRect(x - 5, ry - BEST_STEP / 2, BEST_W + 10, BEST_STEP);
+    }
+
+    ctx.fillStyle = INK;
+    ctx.textAlign = "center";
+    ctx.font = "12px 'Courier New', monospace";
+    ctx.fillText("ENTER — в меню", W / 2, top + h - 13);
+  }
+
   function drawRecords(y) {
     const x = (W - BEST_W) / 2;
     const col = { rank: x + 6, score: x + 140, lap: x + 250, solved: x + 320,
@@ -14536,10 +14624,12 @@
       return;
     }
 
+    // Пауза теперь поднимает меню, а не просто вывеску, поэтому обратный путь
+    // отсюда убран: снятие паузы делает Escape внутри меню (menuKey). Сюда
+    // «pause» и не доходит — при паузе inMenu поднят, и разбор ушёл выше.
     if (e.key === "Escape") {
       e.preventDefault();
-      if (state === "play") { state = "pause"; }
-      else if (state === "pause") { state = "play"; }
+      if (state === "play") pauseGame();
       return;
     }
 
