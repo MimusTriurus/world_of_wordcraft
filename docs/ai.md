@@ -58,6 +58,7 @@ node tools/ai/marathon.mjs 12 все     # забег до конца, без п
 node tools/ai/bomb.mjs 12             # порог бомбы по классам
 node tools/ai/aim-check.mjs 6         # куда на самом деле летят буквы
 node tools/ai/quota-check.mjs все 8   # не выпускает ли этап больше квоты
+node tools/ai/hud-check.mjs средний 6 # правдиво ли поле «осталось слов»
 node tools/ai/gloss-audit.mjs ru      # пустые толкования
 node tools/ai/sweep.mjs 8 0.8,1.2     # свип READ_MUL
 ```

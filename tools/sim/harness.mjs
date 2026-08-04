@@ -68,6 +68,11 @@ export function boot(seed = 1) {
     get shells() { return shells; },  get tips() { return tips; },
     get lap() { return lap; },
     get stageSpawned() { return stageSpawned; },
+    get poolDry() { return poolDry; },
+    // Ровно та строка, что видит игрок в панели: круг·этап·осталось слов.
+    // Стенду нужна именно она, а не пересчёт по состоянию, — иначе проверялась бы
+    // копия формулы, а не то, что на экране.
+    get hudLevel() { return el.level.textContent; },
 
     // Язык бота: тот же корпус, что у игры. Словарный запас бота — его
     // подмножество по рангу, см. tools/ai/player.mjs.
