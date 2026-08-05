@@ -52,6 +52,9 @@ export function boot(seed = 1) {
   const exportCode = `
   globalThis.__t = {
     update, reset, spawn, blockCost, fieldLoad, alive, rules, solve, dropBomb,
+    // draw нужен стендам, которые проверяют, что новая отрисовка хотя бы не
+    // падает: холст здесь — Proxy, глотающий вызовы, картинки из этого не выйдет.
+    draw,
     DANGER_Y, CANNON_Y, STAGES,
     get blocks() { return blocks; },
     get state() { return state; },  set state(v) { state = v; },
@@ -69,6 +72,11 @@ export function boot(seed = 1) {
     // выстрелами и сжигают комбо ровно так же, как у человека. Всё, что мимо,
     // — это уже не измерение игры, а измерение чего-то другого.
     shootLetter, shootBlock, dropBomb, hint, takePick, draftRows,
+    // Подсказки на поле: карточка теперь не мгновенна, сперва по слову проходит
+    // луч. Снаряды в воздухе уже отдаются ниже, вместе с остальным стволом, — и
+    // снос сноса теперь тоже летит, а не срабатывает на месте.
+    get hints() { return hints; },
+    SCAN_TIME,
     W, H, CANNON_SPEED, SHOT_SPEED, SHOT_COOLDOWN, MAX_SHOTS, STRIKES_TO_BREAK,
     speedNow, loadMul, loadNow, mods, draft, glossOf,
     get cannonX() { return cannonX; }, set cannonX(v) { cannonX = v; },

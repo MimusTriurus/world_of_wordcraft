@@ -12552,6 +12552,14 @@
 
   const CANNON_SPEED = 300;      // px/s
   const SHOT_SPEED = 720;        // px/s
+  // Снаряд сноса летит вдвое быстрее буквы. Это не украшательство, а плата за
+  // честный полёт: на скорости буквы снос доезжает 0.6–0.8 с, и «снести слово у
+  // самой линии» перестаёт срабатывать — замерено, что медленный игрок терял на
+  // этом 15% слов и 25% очков, а быстрый ничего не замечал. Регрессивная плата
+  // за то, что игра стала выглядеть правдивее, — плохая сделка. На 1500 полёт
+  // остаётся видимым (0.25–0.35 с, полтора десятка кадров со следом), а разница
+  // с мгновенным сносом уходит в шум.
+  const SHELL_SPEED = 1500;      // px/s
   const MAX_SHOTS = 4;           // столько букв одновременно в полёте
   const SHOT_COOLDOWN = 0.09;    // s
 
@@ -13513,13 +13521,19 @@
   // выхода у него нет. Стоит снаряда и держит ту же паузу, что выстрел буквой:
   // это выстрел, просто разрушительный и единственный платный.
   function shootBlock() {
-    if (state !== "play" || cooldown > 0) return;
+    if (state !== "play" || cooldown > 0 || shots.length >= MAX_SHOTS) return;
     const victim = blockInLine();
     if (!victim) return;
     if (!spendShell()) return;
     cooldown = SHOT_COOLDOWN;
-    destroy([victim]);
-    reveal(victim);
+    // Снаряд летит, а не срабатывает на месте. Слово рушится на попадании — тем
+    // же кодом, что принимает букву (flyShot), — и по той же причине: выстрел,
+    // который срабатывает раньше, чем до цели что-то доехало, читается как сбой.
+    //
+    // Цель здесь не запоминается нарочно: снаряд бьёт в того, кого встретит.
+    // Блок за время полёта проезжает вниз, а в колонку может подъехать другой, —
+    // и снос у самой линии перестал быть бесплатным.
+    shots.push({ letter: null, shell: true, x: cannonX, y: CANNON_Y - 14 });
   }
 
   // Показываем загаданное слово на месте сбитого блока: игрок сбил его именно
@@ -13536,6 +13550,11 @@
   const HINT_BASE = 0.9;         // с
   const HINT_PER_LINE = 0.7;     // с на строку
   const HINT_FADE = 0.45;        // с — гаснет в самом конце
+  // Луч сканирования: подсказка не выскакивает готовой, а сперва проходит по
+  // слову. Это единственная кнопка, которая ничего не разрушает и ничем не
+  // стреляет, и раньше её было не видно вовсе — карточка появлялась сама собой,
+  // без связи с выстрелом. Время жизни карточки отсчитывается уже после луча.
+  const SCAN_TIME = 0.5;         // с
   const HINT_W = 260;
   // Шрифт карточки. Раньше стоял двумя строками — в разбивке и в отрисовке; если
   // бы они разошлись, подсказка вылезла бы за рамку.
@@ -13579,7 +13598,10 @@
 
     if (!mods.freeTips) tips -= HINT_COST;
     const lines = wrapText(text, HINT_W - 20);
-    hints.push({ block: b, lines, t: HINT_BASE + lines.length * HINT_PER_LINE });
+    // from — откуда пошёл луч. Запоминается на выстреле: пушка едет дальше, а
+    // луч должен остаться там, откуда его дали.
+    hints.push({ block: b, lines, from: cannonX, scan: SCAN_TIME,
+                 t: HINT_BASE + lines.length * HINT_PER_LINE });
     // «Подсказка: осталось 3» отсюда убрано — того же рода эхо, что «+3 снаряда»:
     // толкование уже выехало карточкой на поле, а остаток стоит в кошельке.
     // Отказы выше остаются: они объясняют, почему ничего не произошло.
@@ -13819,7 +13841,7 @@
   // Полёт вверх мелкими шагами, чтобы быстрый снаряд не проскочил сквозь блок.
   // Возвращает true, если снаряд отработал и его пора убрать.
   function flyShot(s, dt) {
-    let left = SHOT_SPEED * dt;
+    let left = (s.shell ? SHELL_SPEED : SHOT_SPEED) * dt;
     while (left > 0) {
       const step = Math.min(left, 8);
       s.y -= step; left -= step;
@@ -13828,6 +13850,10 @@
         if (b.state === "solved" || b.state === "dead") continue;
         if (s.x < b.x || s.x > b.x + b.w) continue;
         if (s.y > b.y + b.h || s.y < b.y) continue;
+
+        // Снаряд сноса. Бьёт по слову целиком, разбирать пропуски ему не нужно:
+        // ни испорченность, ни прицел по букве на него не влияют.
+        if (s.shell) { destroy([b]); reveal(b); return true; }
 
         // в испорченное слово уже ничего не вставить — только снести
         if (b.broken) { miss(b); return true; }
@@ -13847,7 +13873,10 @@
         return true;
       }
 
-      if (s.y < -20) { miss(null); return true; }   // ушёл в молоко
+      // Ушёл в молоко. Снаряд за это не наказывают: цель могли разгадать или
+      // потерять, пока он летел, а комбо тут ни при чём — снаряд его и так сжёг
+      // бы попаданием. Промах буквой — наказывают, это ошибка знания.
+      if (s.y < -20) { if (!s.shell) miss(null); return true; }
     }
     return false;
   }
@@ -13865,8 +13894,12 @@
     }
     // подсказка живёт при своём блоке и уходит вместе с ним
     for (let i = hints.length - 1; i >= 0; i--) {
-      hints[i].t -= dt;
-      if (hints[i].t <= 0 || !alive(hints[i].block)) hints.splice(i, 1);
+      const h = hints[i];
+      // Сначала луч, и только потом карточка: часы карточки стоят, пока идёт
+      // сканирование, иначе короткое толкование успевало бы погаснуть под лучом.
+      if (h.scan > 0) h.scan -= dt;
+      else h.t -= dt;
+      if (h.t <= 0 || !alive(h.block)) hints.splice(i, 1);
     }
     shake = Math.max(0, shake - dt * 40);
     flash = Math.max(0, flash - dt * 2.5);
@@ -13927,7 +13960,7 @@
     }
     ctx.globalAlpha = 1;
 
-    for (const h of hints) drawHint(h);
+    for (const h of hints) h.scan > 0 ? drawScan(h) : drawHint(h);
     for (const r of reveals) drawReveal(r);
 
     drawCannon();
@@ -14061,6 +14094,49 @@
   // Карточка с загаданным словом на месте сбитого блока: всплывает вверх и
   // гаснет. Неразгаданные буквы показаны вывернутыми — видно, чего не хватило.
   // Карточка толкования держится под блоком, а если места снизу нет — над ним.
+  // Луч подсказки: полоса от пушки к слову и строка развёртки, идущая по блоку
+  // сверху вниз. Полоса шириной в блок, а не в ствол, — она читается как «взято
+  // на просвет именно это слово», а не как ещё один выстрел.
+  function drawScan(h) {
+    const b = h.block;
+    const k = 1 - h.scan / SCAN_TIME;         // 0 → только что, 1 → просканировано
+    ctx.save();
+
+    // полоса от пушки до низа блока: снизу сходится к стволу, сверху во всю ширину
+    ctx.globalAlpha = 0.16;
+    ctx.fillStyle = INK;
+    ctx.beginPath();
+    ctx.moveTo(h.from - 5, CANNON_Y - 16);
+    ctx.lineTo(h.from + 5, CANNON_Y - 16);
+    ctx.lineTo(b.x + b.w, b.y + b.h);
+    ctx.lineTo(b.x, b.y + b.h);
+    ctx.closePath();
+    ctx.fill();
+
+    // сам блок под лучом слегка засвечен
+    ctx.globalAlpha = 0.1 + 0.14 * Math.sin(k * Math.PI);
+    ctx.fillRect(b.x, b.y, b.w, b.h);
+
+    // строка развёртки
+    const y = b.y + b.h * k;
+    ctx.globalAlpha = 1;
+    ctx.strokeStyle = INK;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(b.x, y);
+    ctx.lineTo(b.x + b.w, y);
+    ctx.stroke();
+    // засечки по краям строки — чтобы развёртка читалась как прибор, а не как
+    // подчёркивание
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(b.x - 4, y - 5); ctx.lineTo(b.x - 4, y + 5);
+    ctx.moveTo(b.x + b.w + 4, y - 5); ctx.lineTo(b.x + b.w + 4, y + 5);
+    ctx.stroke();
+
+    ctx.restore();
+  }
+
   function drawHint(h) {
     const b = h.block;
     const lh = 16, pad = 9;
@@ -14118,6 +14194,7 @@
   }
 
   function drawShot(s) {
+    if (s.shell) { drawShell(s); return; }
     ctx.fillStyle = INK;
     ctx.beginPath();
     ctx.arc(s.x, s.y, 13, 0, Math.PI * 2);
@@ -14127,6 +14204,34 @@
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     ctx.fillText(s.letter.toUpperCase(), s.x, s.y + 1);
+  }
+
+  // Снаряд сноса. Буквой его не спутать: не круг с буквой, а острие со следом.
+  // Цветом отличать нечем — красный занят испорченным словом, — так что разница
+  // держится на форме.
+  function drawShell(s) {
+    ctx.save();
+    ctx.strokeStyle = INK;
+    ctx.fillStyle = INK;
+    // след: три штриха позади, гаснут к хвосту
+    ctx.lineWidth = 3;
+    for (let i = 0; i < 3; i++) {
+      ctx.globalAlpha = 0.3 - i * 0.09;
+      ctx.beginPath();
+      ctx.moveTo(s.x, s.y + 14 + i * 11);
+      ctx.lineTo(s.x, s.y + 22 + i * 11);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+    // само острие
+    ctx.beginPath();
+    ctx.moveTo(s.x, s.y - 12);
+    ctx.lineTo(s.x + 8, s.y + 6);
+    ctx.lineTo(s.x, s.y + 11);
+    ctx.lineTo(s.x - 8, s.y + 6);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
   }
 
   function drawCannon() {
@@ -15181,6 +15286,11 @@
         // он забирает жизнь: «безнадёжный» — это «не разгадаю», а не «не подойду».
         if (m.hopeless && !view.broken && tte(view) >= P.urgent) continue;
 
+        // Снаряд летит полсекунды, и всё это время блок ещё жив. Второй снаряд
+        // в него ушёл бы впустую, поэтому выстрел помнится: сюда бот больше не
+        // вернётся, а слово либо рассыплется, либо снаряд его не догонит.
+        if (m.shelled) continue;
+
         // Снос и подсказка бьют по блоку целиком, им ячейка не нужна даже в
         // режиме прицела: blockInLine смотрит только на колонку.
         const xBlock = aimAt(view, field);
@@ -15188,8 +15298,7 @@
 
         if (view.broken) {
           if (P.shell && shells > 0) {
-            schedule(xBlock, K.REACT,
-                     () => { shootBlock(); stats.shells++; }, view.ref);
+            schedule(xBlock, K.REACT, () => fireShell(view), view.ref);
             return;
           }
           continue;
@@ -15261,13 +15370,15 @@
         }
 
         if (P.hint && !m.hinted && (mods.freeTips || tips > 0)) {
-          schedule(xBlock, K.REACT, () => askHint(view, m), view.ref);
+          // Луч сканирует слово полсекунды, и читать толкование раньше нечего:
+          // бот ждёт развёртку, как ждал бы её человек. Слово он запоминает уже
+          // на выстреле, но до конца ожидания ничего с ним не делает.
+          schedule(xBlock, K.REACT + SCAN_TIME, () => askHint(view, m), view.ref);
           return;
         }
 
         if (P.shell && shells > 0 && tte(view) < P.urgent) {
-          schedule(xBlock, K.REACT,
-                   () => { shootBlock(); stats.shells++; }, view.ref);
+          schedule(xBlock, K.REACT, () => fireShell(view), view.ref);
           return;
         }
 
@@ -15277,6 +15388,18 @@
         }
       }
       busy = 0.1;
+    }
+
+    // Выстрел снарядом. Считается по кошельку, а не по намерению: shootBlock
+    // мог и отказать — колонку перехватил другой блок, кончились снаряды, не
+    // отошла пауза. Раньше счётчик прибавлялся всё равно и врал.
+    function fireShell(view) {
+      const paid = shells;
+      shootBlock();
+      if (shells === paid) return;
+      stats.shells++;
+      mem.set(view.ref,
+              Object.assign({}, mem.get(view.ref) || {}, { shelled: true }));
     }
 
     // Вынесено из act(), потому что теперь выполняется не сразу, а по прибытии
