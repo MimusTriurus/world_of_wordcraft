@@ -27,6 +27,11 @@ const click = () => g.pointer("pointerdown", { button: 0, clientX: 200, clientY:
 g.startAttract();
 ok("демо включено сразу", g.attract === true);
 ok(`круг демо ${g.lap} (ждём ${g.ATTRACT_LAP})`, g.lap === g.ATTRACT_LAP);
+// Демо обучения не проходит: объяснять кнопки некому, а три остановки подряд
+// смотрелись бы поломкой. Слоты открыты с первого кадра, обойма полная.
+ok(`все три слота открыты сразу (${g.unlocked.size})`, g.unlocked.size === 3);
+ok(`обойма полная: ${g.shells}/${g.bombs}/${g.tips}`,
+   g.shells === 3 && g.bombs === 1 && g.tips === 2);
 run(60 * 40);
 ok(`демо играет само: решено ${g.solved}`, g.solved > 3);
 // Демо не заводит своего состояния: у него обычные play / draft / over.
@@ -63,6 +68,22 @@ ok("drawAttract не падает", true);
      Math.abs(by + bh / 2 - g.H / 2) < 1);
   ok(`не задевает линию смерти (${(by + bh).toFixed(0)} против ${g.DANGER_Y})`,
      by + bh < g.DANGER_Y);
+
+  // На раздаче приглашение уезжает в полосу НАД панелью: обе вещи центрированы
+  // по высоте, и на месте им вдвоём тесно. Проверяем самый высокий из экранов —
+  // улучшение с пришедшей за круг обоймой: у него полоса сверху самая узкая.
+  const wasKind = g.draft.kind, wasStocked = g.draft.stocked, wasState = g.state;
+  g.draft.kind = "upgrade";
+  g.draft.stocked = true;
+  g.draft.cards = g.UPGRADES.slice(0, 3);
+  g.state = "draft";
+  const dy = Math.max(6, g.draftTop() - bh - 10);
+  ok(`на раздаче приглашение на ${dy.toFixed(0)}, панель с ${g.draftTop()}`,
+     dy + bh <= g.draftTop());
+  ok(`и не уехало за верх экрана (${dy.toFixed(0)})`, dy >= 0);
+  g.drawAttract();
+  ok("drawAttract на раздаче не падает", true);
+  g.draft.kind = wasKind; g.draft.stocked = wasStocked; g.state = wasState;
 }
 
 // ---- 3. экран раздачи видно глазами ------------------------------------------
