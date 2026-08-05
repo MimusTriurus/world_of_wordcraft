@@ -16,6 +16,14 @@ export function mulberry32(seed) {
 }
 
 const noop = () => {};
+
+// Журнал отрисовки. Картинку в Node снять нельзя, но проверить «строки бота
+// бледнее, чем строки игрока» — можно: прозрачность и текст ложатся сюда в том
+// порядке, в каком их выдал холст. По умолчанию выключен: гонялки draw() не
+// зовут вовсе, а стенды включают его на один вызов.
+const draws = [];
+let recording = false;
+
 function fakeCtx() {
   // measureText нужен настоящий: wrapText в подсказке читает .width, и на
   // заглушке-пустышке падает. Courier моноширинный — знак занимает 0.6 кегля,
@@ -25,9 +33,20 @@ function fakeCtx() {
   // 0.6 × 13 под шрифт подсказки, и для всего остального заглушка врала. Пока
   // мерили только подсказку, это не проявлялось.
   const base = {
+    // Заданы заранее: неизвестный ключ Proxy подменяет заглушкой-функцией, и
+    // чтение globalAlpha до первой записи вернуло бы функцию вместо числа.
+    globalAlpha: 1,
+    font: "13px monospace",
     measureText(s) {
       const m = /(\d+(?:\.\d+)?)px/.exec(this.font || "13px");
       return { width: s.length * 0.6 * (m ? +m[1] : 13) };
+    },
+    fillText(text, x, y) {
+      if (recording) draws.push({ op: "text", text, x, y, alpha: this.globalAlpha,
+                                  font: this.font });
+    },
+    strokeRect(x, y, w, h) {
+      if (recording) draws.push({ op: "rect", x, y, w, h, alpha: this.globalAlpha });
     },
   };
   return new Proxy(base, {
@@ -174,8 +193,14 @@ export function boot(seed = 1) {
     get attract() { return attract; },
     get inMenu() { return inMenu; },
     get attractT() { return attractT; },
+    // Две таблицы рекордов: своя у игрока, своя у бота. lastBot говорит, в какой
+    // из них место последнего забега.
     get records() { return records; },
+    get botRecords() { return botRecords; },
     get lastPlace() { return lastPlace; },
+    get lastBot() { return lastBot; },
+    BEST_MAX, BOT_MAX, BEST_STEP, BEST_LABEL, BEST_GAP, BEST_W,
+    recordsH, blockH, drawRecords,
     get autopilot() { return autopilot; },
     get lives() { return lives; },  set lives(v) { lives = v; },
     set score(v) { score = v; },
@@ -228,5 +253,9 @@ export function boot(seed = 1) {
     events.keyup(Object.assign({}, noEvent, typeof e === "string" ? { key: e } : e));
   api.pointer = (type, e) => events[type] &&
     events[type](Object.assign({}, noEvent, e));
+  // Журнал отрисовки: record(true) включает и чистит, record(false) выключает.
+  // Читать — api.draws.
+  api.record = on => { recording = !!on; if (on) draws.length = 0; };
+  api.draws = draws;
   return api;
 }

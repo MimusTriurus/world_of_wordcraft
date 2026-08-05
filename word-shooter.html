@@ -12531,8 +12531,9 @@
   // смотрит на state, а отличается демо не правилами, а тем, что его никто не
   // просил и никуда не записывают.
   // Место последнего забега в таблице рекордов, −1 — не попал. Живёт до конца
-  // следующего забега: его показывает экран GAME OVER.
-  let lastPlace = -1;
+  // следующего забега: его показывает экран GAME OVER. lastBot говорит, в какой
+  // из двух таблиц это место: у игрока и у бота они свои.
+  let lastPlace = -1, lastBot = false;
   // Показывать ли техническую сводку в панели. Клавиша 0, между сессиями не
   // запоминается: это отладочный взгляд, а не настройка игры.
   let showRules = false;
@@ -12777,6 +12778,15 @@
   // и ужесточение: старт не с первого круга даёт множитель очков, которого
   // на общих основаниях пришлось бы добиваться игрой.
   const BEST_MAX = 10;
+  // Бот считается отдельно, и это не косметика. Он играет заметно лучше живого
+  // человека — быстрый класс берёт 166 тысяч за забег, — так что в общей десятке
+  // он занял бы её целиком и вытеснил игрока из его же таблицы. Два счёта не
+  // конкурируют за одни и те же строки: своя десятка у игрока, своя тройка у
+  // бота. Тройка, потому что таблица бота — мерка, а не список достижений: демо
+  // играет само и без остановки, и десять почти одинаковых больших чисел ничего
+  // к мерке не добавляют. Заодно два блока по десять строк не влезли бы на экран
+  // рекордов: 680 px при холсте в 660.
+  const BOT_MAX = 3;
   // Версия условий забега. Меняется, когда прежние строки перестают быть
   // сравнимыми с новыми: сперва слово стало оплачиваться по скорости (2),
   // затем обойма опустела и запасы переехали в раздачу (3), затем этапов
@@ -12784,28 +12794,44 @@
   // выдавать полную обойму вместо выбора одной строки (5). Одна таблица на
   // две шкалы врала бы вечно, поэтому старые строки отбрасываются.
   const BEST_VER = 5;
-  let records = [];
-  try {
-    const raw = JSON.parse(localStorage.getItem("ws-best") || "[]");
-    if (Array.isArray(raw))
-      records = raw.filter(r => r && typeof r.score === "number" && r.v === BEST_VER);
-  } catch { /* испорченная запись — начинаем таблицу заново */ }
+  // Два хранилища и две таблицы. Версия у них общая: обе меряют один забег, и
+  // если условия перестали быть сравнимыми, то сразу для обоих.
+  function loadBest(key) {
+    try {
+      const raw = JSON.parse(localStorage.getItem(key) || "[]");
+      if (Array.isArray(raw))
+        return raw.filter(r => r && typeof r.score === "number" && r.v === BEST_VER);
+    } catch { /* испорченная запись — начинаем таблицу заново */ }
+    return [];
+  }
+  let records = loadBest("ws-best");
+  let botRecords = loadBest("ws-best-bot");
 
-  // Возвращает место в таблице (0-based) или -1, если забег в неё не попал.
+  // Возвращает место в СВОЕЙ таблице (0-based) или -1, если забег в неё не попал.
+  // Чья это таблица, говорит lastBot: рамку своей строки рисовать надо в том
+  // блоке, куда забег и лёг.
   //
-  // Забег автопилота не попадает вовсе, и это не то же самое, что звёздочка у
-  // модификаторов. Там послабление, но игрок сыграл сам, поэтому выкидывать
-  // строку нечестно. Здесь играл не он — записывать нечего.
+  // Забег бота идёт в свою таблицу, а не в общую и не в никуда. Раньше он не
+  // записывался вовсе, и это была полумера: сравнить себя с ботом было нельзя,
+  // хотя демо крутит его забеги на глазах у игрока с первой секунды.
+  //
+  // Звёздочка ставится и боту, и по той же причине: демо начинает с ATTRACT_LAP,
+  // то есть с готовым множителем очков, которого на общих основаниях пришлось бы
+  // добиваться игрой. Условие послаблений здесь шире, чем у игрока, ровно на это
+  // слагаемое — mods.lap демо не трогает, оно ставит lap напрямую.
   function recordRun() {
-    if (mods.autopilot || attract) return -1;
+    const bot = mods.autopilot || attract;
     const row = { v: BEST_VER, score, lap, stage: stage + 1, solved, lang,
-                  easy: mods.freeTips || mods.lap > 1 };
-    records.push(row);
-    records.sort((a, b) => b.score - a.score);
-    records.length = Math.min(records.length, BEST_MAX);
-    try { localStorage.setItem("ws-best", JSON.stringify(records)); }
-    catch { /* хранилище недоступно — таблица проживёт до перезагрузки */ }
-    return records.indexOf(row);
+                  easy: attract || mods.freeTips || mods.lap > 1 };
+    const table = bot ? botRecords : records;
+    table.push(row);
+    table.sort((a, b) => b.score - a.score);
+    table.length = Math.min(table.length, bot ? BOT_MAX : BEST_MAX);
+    try {
+      localStorage.setItem(bot ? "ws-best-bot" : "ws-best", JSON.stringify(table));
+    } catch { /* хранилище недоступно — таблица проживёт до перезагрузки */ }
+    lastBot = bot;
+    return table.indexOf(row);
   }
 
   // -------------------------------------------------------------------- меню
@@ -12915,12 +12941,21 @@
   const MENU_STEP = 44, MENU_W = 300;
   const MENU_HEAD = 92, MENU_FOOT = 46;   // место под заголовок и подсказку
   const BEST_STEP = 26, BEST_HEAD = 30, BEST_W = 380;
+  const BEST_LABEL = 18, BEST_GAP = 12;   // подпись блока и просвет между блоками
+
+  // Высота одного блока и обоих вместе. Считается от содержимого: пустая таблица
+  // занимает одну строку («пока пусто»), полная — свои десять или три. Шапка со
+  // именами столбцов одна на оба блока: столбцы у них те же, и второй раз она
+  // была бы повторением ради повторения — да и 30 px экрану дороги.
+  const blockH = (n, head) =>
+    BEST_LABEL + (head ? BEST_HEAD : 0) + Math.max(1, n) * BEST_STEP;
+  const recordsH = () =>
+    blockH(records.length, true) + BEST_GAP + blockH(botRecords.length, false);
 
   // Экран модификаторов вырос до девяти пунктов, а рекорды вставляют таблицу
   // между заголовком и пунктами, поэтому раскладка считается от содержимого,
   // а не от середины холста: иначе список уезжает за нижний край.
-  const bodyExtra = () => menu.screen === "best"
-    ? BEST_HEAD + Math.max(1, records.length) * BEST_STEP : 0;
+  const bodyExtra = () => menu.screen === "best" ? recordsH() : 0;
   function panelTop() {
     const body = MENU_HEAD + bodyExtra() + menuItems().length * MENU_STEP + MENU_FOOT;
     return Math.max(6, (H - body) / 2);
@@ -13034,7 +13069,8 @@
     // Единственное место, где демо гасится. Иначе его пришлось бы гасить в
     // каждой двери наружу — в языке, в старте забега, — и одну бы забыли:
     // приглашение осталось бы мигать поверх игры и глотать нажатия.
-    attract = false; attractDead = 0; inMenu = false; lastPlace = -1;
+    attract = false; attractDead = 0; inMenu = false;
+    lastPlace = -1; lastBot = false;
     shake = 0; flash = 0;
     cannonX = W / 2; cooldown = 0;
     held.left = held.right = false;
@@ -14279,14 +14315,15 @@
     // Под открытым меню ни конец забега, ни приглашение демо не рисуем: меню
     // кроет середину экрана, они бы столкнулись.
     //
-    // Демо обходится короткой вывеской: своих рекордов у него нет, забег бота в
-    // таблицу не идёт, и показывать ему чужую таблицу незачем.
-    if (state === "over" && !inMenu) {
-      if (attract) banner("GAME OVER", "демо · круг " + lap);
-      else drawGameOver();
-    }
+    // Экран конца забега один и для игрока, и для демо. Прежде демо обходилось
+    // короткой вывеской, потому что своих рекордов у него не было; теперь есть, и
+    // забег бота заканчивается там же, где чужой, — таблицей, в которой видно и
+    // его строку, и строки игрока.
+    if (state === "over" && !inMenu) drawGameOver();
     // На раздаче приглашение молчит: там сейчас выбирает бот, и это интереснее.
-    if (attract && !inMenu && state !== "draft") drawAttract();
+    // На конце забега — тоже: приглашение стоит в середине экрана, ровно там же,
+    // где теперь таблица, и они бы наложились. Про кнопку GAME OVER скажет сам.
+    if (attract && !inMenu && state !== "draft" && state !== "over") drawAttract();
 
     ctx.restore();
   }
@@ -14318,9 +14355,10 @@
     ctx.font = `bold ${ATTRACT_SIZE}px 'Courier New', monospace`;
     const bw = Math.min(W - 20, ctx.measureText(big).width + 44);
     const bh = ATTRACT_SIZE * 2;
-    // Середина экрана — там же, где banner() рисует «GAME OVER» и где встаёт
-    // меню: все большие надписи держатся одной высоты. Раньше приглашение сидело
-    // над линией смерти, у самого низа, и в углу его было легко не заметить.
+    // Середина экрана — там же, где встают меню и таблица рекордов: все большие
+    // надписи держатся одной высоты. Раньше приглашение сидело над линией смерти,
+    // у самого низа, и в углу его было легко не заметить. С таблицей оно поэтому
+    // не соседствует — на конце забега приглашение не рисуется вовсе.
     //
     // Падающие слова оно при этом собой закрывает — рамка непрозрачная. Так и
     // задумано: это демо, смотреть в нём надо на приглашение, а не на счёт.
@@ -14689,8 +14727,7 @@
   // Своя строка обведена рамкой, а не выделена цветом: красный помечает только
   // испорченное слово. Если забег в десятку не попал, обводить нечего.
   function drawGameOver() {
-    const rows = Math.max(1, records.length);
-    const h = 62 + BEST_HEAD + rows * BEST_STEP + 26;
+    const h = 62 + recordsH() + 26;
     const top = Math.max(6, (H - h) / 2);
     const tableY = top + 62;
 
@@ -14707,52 +14744,73 @@
     ctx.font = "bold 30px 'Courier New', monospace";
     ctx.fillText("GAME OVER", W / 2, top + 24);
     ctx.font = "13px 'Courier New', monospace";
-    ctx.fillText(`круг ${lap} · этап ${stage + 1} · очки ${score} · слов ${solved}`,
+    ctx.fillText((attract ? "демо · " : "") +
+                 `круг ${lap} · этап ${stage + 1} · очки ${score} · слов ${solved}`,
                  W / 2, top + 48);
 
+    // Рамку своей строки рисует сам блок таблицы: место у игрока и у бота
+    // считается каждое в своей, и снаружи её было бы некуда поставить.
     drawRecords(tableY);
-
-    if (lastPlace >= 0) {
-      const x = (W - BEST_W) / 2;
-      // Строки рисуются с центром на +16 от своего верха, отсюда и сдвиг рамки.
-      const ry = tableY + BEST_HEAD + lastPlace * BEST_STEP + 16;
-      ctx.strokeStyle = INK; ctx.lineWidth = 2;
-      ctx.strokeRect(x - 5, ry - BEST_STEP / 2, BEST_W + 10, BEST_STEP);
-    }
 
     ctx.fillStyle = INK;
     ctx.textAlign = "center";
     ctx.font = "12px 'Courier New', monospace";
-    ctx.fillText("ENTER — в меню", W / 2, top + h - 13);
+    // В демо кнопки другие: ENTER начинает свой забег, а не ведёт в меню.
+    ctx.fillText(attract ? "любая кнопка — свой забег · ESC — меню"
+                         : "ENTER — в меню", W / 2, top + h - 13);
   }
 
+  // Оба счёта на одном экране: свои строки сверху и в полную силу, строки бота
+  // ниже и бледнее. Бледность, а не цвет: красным помечается только испорченное
+  // слово. Своя строка последнего забега обводится рамкой — в том блоке, куда
+  // забег и лёг, отсюда lastBot.
   function drawRecords(y) {
+    const own = blockH(records.length, true);
+    drawTable(y, records, "ИГРОК", true, 1, "Пока пусто — сыграй забег",
+              lastBot ? -1 : lastPlace);
+    drawTable(y + own + BEST_GAP, botRecords, "БОТ", false, 0.55,
+              "Пока пусто — посмотри демо", lastBot ? lastPlace : -1);
+  }
+
+  // Один блок таблицы. head — рисовать ли имена столбцов (шапка одна на оба
+  // блока), alpha — насколько блок бледен, place — какую строку обвести.
+  function drawTable(y, rows, label, head, alpha, empty, place) {
     const x = (W - BEST_W) / 2;
     const col = { rank: x + 6, score: x + 140, lap: x + 250, solved: x + 320,
                   lang: x + BEST_W - 6 };
+    const top = y + BEST_LABEL + (head ? BEST_HEAD : 0);
 
-    ctx.font = "12px 'Courier New', monospace";
+    ctx.globalAlpha = alpha;
     ctx.fillStyle = INK;
-    ctx.textAlign = "left";   ctx.fillText("#", col.rank, y + 14);
-    ctx.textAlign = "right";  ctx.fillText("ОЧКИ", col.score, y + 14);
-    ctx.textAlign = "center"; ctx.fillText("КРУГ/ЭТАП", col.lap, y + 14);
-    ctx.textAlign = "right";  ctx.fillText("СЛОВ", col.solved, y + 14);
-    ctx.textAlign = "right";  ctx.fillText("ЯЗ", col.lang, y + 14);
+    ctx.font = "bold 12px 'Courier New', monospace";
+    ctx.textAlign = "left";
+    ctx.fillText(label, x + 6, y + 8);
+
+    if (head) {
+      ctx.font = "12px 'Courier New', monospace";
+      const hy = y + BEST_LABEL + 14;
+      ctx.textAlign = "left";   ctx.fillText("#", col.rank, hy);
+      ctx.textAlign = "right";  ctx.fillText("ОЧКИ", col.score, hy);
+      ctx.textAlign = "center"; ctx.fillText("КРУГ/ЭТАП", col.lap, hy);
+      ctx.textAlign = "right";  ctx.fillText("СЛОВ", col.solved, hy);
+      ctx.textAlign = "right";  ctx.fillText("ЯЗ", col.lang, hy);
+    }
 
     ctx.strokeStyle = "rgba(43,49,34,.35)"; ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.moveTo(x, y + 21); ctx.lineTo(x + BEST_W, y + 21);
+    ctx.moveTo(x, top - 9); ctx.lineTo(x + BEST_W, top - 9);
     ctx.stroke();
 
-    if (!records.length) {
+    if (!rows.length) {
       ctx.textAlign = "center";
       ctx.font = "13px 'Courier New', monospace";
-      ctx.fillText("Пока пусто — сыграй забег", W / 2, y + BEST_HEAD + 16);
+      ctx.fillText(empty, W / 2, top + 16);
+      ctx.globalAlpha = 1;
       return;
     }
 
-    records.forEach((r, i) => {
-      const ry = y + BEST_HEAD + i * BEST_STEP + 16;
+    rows.forEach((r, i) => {
+      const ry = top + i * BEST_STEP + 16;
       ctx.font = "bold 14px 'Courier New', monospace";
       ctx.textAlign = "left";   ctx.fillText(String(i + 1), col.rank, ry);
       ctx.textAlign = "right";  ctx.fillText(r.score + (r.easy ? "*" : ""), col.score, ry);
@@ -14762,6 +14820,13 @@
       ctx.font = "12px 'Courier New', monospace";
       ctx.textAlign = "right";  ctx.fillText((r.lang || "ru").toUpperCase(), col.lang, ry);
     });
+
+    if (place >= 0 && place < rows.length) {
+      const ry = top + place * BEST_STEP + 16;
+      ctx.strokeStyle = INK; ctx.lineWidth = 2;
+      ctx.strokeRect(x - 5, ry - BEST_STEP / 2, BEST_W + 10, BEST_STEP);
+    }
+    ctx.globalAlpha = 1;
   }
 
   // Выпадающий список поверх меню: своя подложка, чтобы пункты под ним
@@ -15034,19 +15099,9 @@
     ctx.fillText(u.note, r.x + 62, cy + 14);
   }
 
-  function banner(title, sub) {
-    ctx.fillStyle = "rgba(158,173,134,.86)";
-    ctx.fillRect(0, H / 2 - 60, W, 120);
-    ctx.strokeStyle = INK; ctx.lineWidth = 2;
-    ctx.strokeRect(0, H / 2 - 60, W, 120);
-    ctx.fillStyle = INK;
-    ctx.textAlign = "center";
-    ctx.font = "bold 30px 'Courier New', monospace";
-    ctx.fillText(title, W / 2, H / 2 - 12);
-    ctx.font = "14px 'Courier New', monospace";
-    ctx.fillText(sub, W / 2, H / 2 + 24);
-  }
-
+  // banner() здесь был и убран вместе со своим единственным вызовом: короткую
+  // вывеску «GAME OVER · демо» показывало демо, а теперь у него та же таблица,
+  // что у игрока.
   function roundRect(x, y, w, h, r) {
     ctx.beginPath();
     ctx.moveTo(x + r, y);

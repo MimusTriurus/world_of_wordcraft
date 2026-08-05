@@ -41,12 +41,17 @@ ok(`забег шёл сам: решены слова (${g.solved})`, g.solved >
 console.log(`       круг ${g.lap}, очки ${g.score}, жизней ${g.lives}, ` +
             `состояние ${g.state}`);
 
-// ---- 3. забег бота в таблицу не попадает ------------------------------------
-const before = g.records.length;
-ok("recordRun вернул −1", g.recordRun() === -1);
-ok("строк в таблице не прибавилось", g.records.length === before);
+// ---- 3. забег бота идёт в свою таблицу, а не в таблицу игрока ----------------
+const before = g.records.length, botBefore = g.botRecords.length;
+ok("recordRun вернул место", g.recordRun() >= 0);
+ok("в таблице игрока не прибавилось", g.records.length === before);
+ok(`в таблице бота прибавилось (${botBefore} → ${g.botRecords.length})`,
+   g.botRecords.length === botBefore + 1);
+ok("место посчитано в таблице бота", g.lastBot === true);
+ok(`таблица бота не длиннее ${g.BOT_MAX}`, g.botRecords.length <= g.BOT_MAX);
 g.mods.autopilot = false;
-ok("без автопилота запись проходит", g.recordRun() >= 0);
+ok("без автопилота запись идёт игроку", g.recordRun() >= 0 && g.lastBot === false);
+ok("и прибавилась именно она", g.records.length === before + 1);
 
 // ---- 4. отрисовка при включённом автопилоте не падает -----------------------
 g.mods.autopilot = true;
