@@ -149,26 +149,49 @@ export function boot(seed = 1) {
     // нужен прежней модели, у которой представления о словах нет вовсе, только
     // вероятность попасть, и стендам, которые проверяют самого бота.
     oracle: { acceptsAt, gapChoices, neighboursOf },
+
+    // ---- экраны и кадр -----------------------------------------------------
+    // Всё, что нужно стендам про интерфейс: сам кадр (гонялки его обходят и
+    // зовут update напрямую), экраны меню, демо и отрисовку. Рисовать в Node
+    // нельзя — холст глотает вызовы, — но упасть отрисовка может, и падала:
+    // улучшение без иконки валило весь экран раздачи.
+    frame, draw, drawMenu, drawDraft, drawGameOver, drawAttract,
+    startAttract, pauseGame, resume, recordRun, loseLife,
+    SCREENS, MENU_TITLES, menu, el, syncHud, hudView, rulesView, ICONS, UPGRADES,
+    ATTRACT_LAP, ATTRACT_CLASS, ATTRACT_RESTART, ATTRACT_BLINK, ATTRACT_DUTY,
+    ATTRACT_SIZE,
+    get attract() { return attract; },
+    get inMenu() { return inMenu; },
+    get attractT() { return attractT; },
+    get records() { return records; },
+    get lastPlace() { return lastPlace; },
+    get autopilot() { return autopilot; },
+    get lives() { return lives; },  set lives(v) { lives = v; },
+    set score(v) { score = v; },
+    get bestCombo() { return bestCombo; },
   };`;
   const tail = "  requestAnimationFrame(frame);\n})();";
   if (!src.includes(tail)) throw new Error("не нашёл хвост цикла");
   src = src.replace(tail, exportCode + "\n})();");
 
   const store = new Map();
+  // Обработчики событий запоминаем, а не глотаем: стенды экранов дёргают их как
+  // браузер. Один объект на клавиши и на мышь — имена типов не пересекаются.
+  const events = {};
+  const listen = (t, h) => { events[t] = h; };
   const canvas = {
     width: 0, height: 0, style: {},
     getContext: () => fakeCtx(),
-    addEventListener: noop,
+    addEventListener: listen,
     getBoundingClientRect: () => ({ left: 0, top: 0, width: 470, height: 660 }),
   };
   const document = {
-    getElementById: () => ({ textContent: "", innerHTML: "", style: {} }),
+    getElementById: id =>
+      id === "game" ? canvas : { textContent: "", innerHTML: "", style: {} },
     querySelectorAll: () => [],
-    addEventListener: noop,
+    addEventListener: listen,
   };
-  document.getElementById = id =>
-    id === "game" ? canvas : { textContent: "", innerHTML: "", style: {} };
-  const window = { devicePixelRatio: 1, addEventListener: noop };
+  const window = { devicePixelRatio: 1, addEventListener: listen };
   const localStorage = {
     getItem: k => (store.has(k) ? store.get(k) : null),
     setItem: (k, v) => store.set(k, v),
@@ -180,5 +203,19 @@ export function boot(seed = 1) {
                "requestAnimationFrame", src)
     (document, window, localStorage, performance, () => 0);
 
-  return globalThis.__t;
+  // Настоящие события. Дописываются здесь, а не в экспорте внутри игры: там нет
+  // доступа к замыканию харнесса, где лежат сами обработчики.
+  //
+  // Стенды дёргают их так же, как браузер, и это принципиально: проверять
+  // клавишу «0» прямым вызовом syncHud() значило бы проверять свою же догадку о
+  // том, что эта клавиша делает.
+  const api = globalThis.__t;
+  const noEvent = { preventDefault: noop, key: "", code: "", button: 0 };
+  api.key = e => events.keydown &&
+    events.keydown(Object.assign({}, noEvent, typeof e === "string" ? { key: e } : e));
+  api.keyUp = e => events.keyup &&
+    events.keyup(Object.assign({}, noEvent, typeof e === "string" ? { key: e } : e));
+  api.pointer = (type, e) => events[type] &&
+    events[type](Object.assign({}, noEvent, e));
+  return api;
 }
