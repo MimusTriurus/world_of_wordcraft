@@ -12,6 +12,9 @@ const ok = (n, c) => { console.log((c ? "ok   " : "ПЛОХО") + "  " + n); if 
 function ready(seed, minY = 60, stage = 0) {
   const g = boot(seed);
   g.reset(true);
+  // Забег начинается с закрытой обоймой, а осколки родятся только от сноса.
+  // Открываем слот тем же путём, что и игра.
+  g.unlock("shells");
   g.stage = stage;                 // этап задаёт длину слов: 0 — короткие, 2 — длинные
   for (let i = 0; i < 1500; i++) {
     g.update(DT);

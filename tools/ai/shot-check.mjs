@@ -14,6 +14,8 @@ const ok = (n, c) => { console.log((c ? "ok   " : "ПЛОХО") + "  " + n); if 
 function ready(seed) {
   const g = boot(seed);
   g.reset(true);
+  // Забег начинается с закрытой обоймой; снаряд стенду нужен с первого кадра.
+  g.unlock("shells");
   for (let i = 0; i < 1200; i++) {
     g.update(DT);
     const b = g.blocks.find(x => x.state === "live" && x.y + x.h > 60 &&

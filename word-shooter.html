@@ -125,9 +125,15 @@
       </div>
       <div class="label">COMBO</div><div class="value small" id="combo">x1</div>
       <div class="label">LIVES</div><div class="value small" id="lives">♥♥♥</div>
-      <div class="label">BOMBS</div><div class="value small" id="bombs">◆◆◆</div>
-      <div class="label">ПОДСКАЗКИ</div><div class="value small" id="tips">?????</div>
-      <div class="label">СНАРЯДЫ</div><div class="value small" id="shells">6</div>
+      <!-- Три слота обоймы скрыты, пока не открыты: забег начинается пустым, и
+           кошелёк, в котором никогда ничего не было, читался бы как поломка.
+           Метка прячется вместе со значением, поэтому у неё свой id. -->
+      <div class="label" id="bombsLabel">BOMBS</div>
+      <div class="value small" id="bombs">◆◆◆</div>
+      <div class="label" id="tipsLabel">ПОДСКАЗКИ</div>
+      <div class="value small" id="tips">?????</div>
+      <div class="label" id="shellsLabel">СНАРЯДЫ</div>
+      <div class="value small" id="shells">6</div>
       <!-- Техническая сводка: из чего сейчас складывается сложность. Спрятана и
            стоит последней — в игре она не нужна, нужна при разборе баланса.
            Показывается клавишей 0, см. showRules. -->
@@ -12512,6 +12518,11 @@
     bombs: document.getElementById("bombs"),
     tips:  document.getElementById("tips"),
     shells: document.getElementById("shells"),
+    // Метки трёх слотов обоймы — только затем, что слот прячется целиком, пока
+    // не открыт. У остальных меток id нет: их никто не прячет.
+    bombsLabel:  document.getElementById("bombsLabel"),
+    tipsLabel:   document.getElementById("tipsLabel"),
+    shellsLabel: document.getElementById("shellsLabel"),
     rules: document.getElementById("rules"),
   };
 
@@ -12677,6 +12688,93 @@
   // давать силу и таблица рекордов станет таблицей стажа. См. docs/roguelite.md.
   const gear = { shells: null, bombs: null, tips: null };
 
+  // --------------------------------------------------------------- обучение
+  // Забег начинается с тремя ПУСТЫМИ и ЗАКРЫТЫМИ слотами. Каждый открывается в
+  // тот момент, когда его нужда впервые появилась на поле, — и открывается
+  // окном, которое говорит, зачем эта кнопка и как ею пользоваться.
+  //
+  // ПОЧЕМУ НЕ «ЗА N РЕШЁННЫХ СЛОВ». Выдача по счёту решённых — это правило
+  // «награда за пройденную границу» в чистом виде: аварийный выход достался бы
+  // тому, кто и так справляется. У этого есть прямой замер: полная обойма на
+  // старте стоила медленному игроку 33% слов, и разница почти целиком в двух
+  // подсказках, — то есть слабому игроку дорого именно непонимание слова. Есть
+  // и второй: испорченные слова первого этапа не лечит никакая раздача, потому
+  // что она случается позже, и даже +6 за этап оставляет те же 0.92.
+  //
+  // Выдача по нужде разворачивает это: у слабого игрока нужда наступает раньше,
+  // значит и запас он получает раньше. Доставка становится прогрессивной.
+  //
+  // Половина поля — та же мера, что и у линии смерти: нижний край блока. Так
+  // «блок прошёл полпути» читается одинаково в обоих правилах.
+  const HALF_Y = H / 2;
+
+  // Порядок здесь — это и порядок открытия при совпадении условий: сперва
+  // «узнать слово», потом «избавиться от слова», потом «избавиться от поля».
+  //
+  // Строк ровно две, зачем и как, и обе влезают в 36 знаков — панель шириной
+  // 330 px при 13px даёт 38. Третья строка общая и стоит подвалом.
+  const TEACH = [
+    { key: "tips", label: "ПОДСКАЗКИ",
+      why: "Не узнаёшь слово — прочти толкование",
+      how: "ПКМ по блоку на линии огня" },
+    { key: "shells", label: "СНАРЯДЫ",
+      why: "Слово испорчено или не поддаётся",
+      how: "ЛКМ сносит блок целиком" },
+    { key: "bombs", label: "БОМБЫ",
+      why: "Поле завалено, разбирать уже некогда",
+      how: "ПРОБЕЛ очищает всё поле разом" },
+  ];
+  const TEACH_FOOT = "Пополняется в раздаче между этапами";
+
+  // Открытые слоты. Пока слот закрыт, его нет нигде: ни в панели, ни в раздаче,
+  // ни в полной порции за круг. Живёт один забег.
+  const unlocked = new Set();
+  // Очередь окон: одно событие может открыть сразу два слота (первый же блок,
+  // дошедший до половины, — это нужда и в подсказке, и в снаряде). Показываем
+  // их по одному, а не двумя панелями внахлёст.
+  const teach = { key: null, queue: [], after: null };
+
+  const supplyOf = key => SUPPLIES.find(s => s.key === key);
+  // Раздача и полная порция ходят только по открытым слотам — правило «выдача
+  // работает только для того, что уже разблокировано».
+  const openSupplies = () => SUPPLIES.filter(s => unlocked.has(s.key));
+
+  // Единственная дверь к открытию слота. Прибавка идёт через stock(), как и у
+  // всех остальных, — четвёртого источника запаса не заводим.
+  function unlock(key) {
+    if (unlocked.has(key)) return;
+    unlocked.add(key);
+    stock(supplyOf(key));
+    teach.queue.push(key);
+    if (state === "play") nextTeach();
+    syncHud();
+  }
+
+  // Достать из очереди следующее окно; пусто — вернуть игру или отдать экран
+  // тому, кто его ждал. Ждёт ровно один — раздача на границе первого этапа:
+  // окна обязаны пройти ПЕРЕД ней, иначе openDraft затрёт собой state и
+  // объяснение слота не покажется вовсе.
+  function nextTeach() {
+    teach.key = teach.queue.shift() || null;
+    if (teach.key) { state = "teach"; return; }
+    const after = teach.after;
+    teach.after = null;
+    state = "play";
+    if (after) after();
+  }
+
+  // Что на поле требует какого слота. Зовётся каждый кадр из update и ещё раз
+  // из wrongLetter — там нужда возникает от выстрела, а не от падения.
+  function checkUnlocks() {
+    const low = blocks.filter(b => alive(b) && b.y + b.h >= HALF_Y).length;
+    if (low >= 1) { unlock("tips"); unlock("shells"); }
+    // «Не осталось снарядов» имеет смысл только у того, у кого они были: пока
+    // слот закрыт, пустой кошелёк — это не беда, а ещё не начатая история.
+    // Без этой оговорки первый же блок у половины открывал бы разом все три.
+    if (low >= 2 || (low >= 1 && unlocked.has("shells") && shells === 0))
+      unlock("bombs");
+  }
+
   // ---------------------------------------------------------------- улучшения
   // Второй слой поверх обоймы: за пройденный круг — три правила на выбор,
   // берётся одно. Симметрия прямая — круг добавляет игре +5 px/s, круг же
@@ -12800,9 +12898,10 @@
   // сравнимыми с новыми: сперва слово стало оплачиваться по скорости (2),
   // затем обойма опустела и запасы переехали в раздачу (3), затем этапов
   // стало три вместо шести и сложность пошла двумя осями (4), затем старт стал
-  // выдавать полную обойму вместо выбора одной строки (5). Одна таблица на
-  // две шкалы врала бы вечно, поэтому старые строки отбрасываются.
-  const BEST_VER = 5;
+  // выдавать полную обойму вместо выбора одной строки (5), затем обойма ушла со
+  // старта вовсе и слоты стали открываться по нужде (6). Одна таблица на две
+  // шкалы врала бы вечно, поэтому старые строки отбрасываются.
+  const BEST_VER = 6;
   // Хранилище одно на все языки и на обоих игравших: разрез по языку делается при
   // показе, а не при записи. Так строки, записанные до появления разреза, остаются
   // читаемыми — язык в них был всегда.
@@ -13077,6 +13176,12 @@
     bombs = 0; tips = 0; shells = 0;      // ниже забег наполнит обойму, меню — нет
     combo = 0; bestCombo = 0; solved = 0;
     taken.clear();
+    // Слоты обоймы закрываются заново каждый забег: обучение работает всегда, а
+    // не один раз на игрока. Лестница способностей — часть забега, и если бы её
+    // проходил только новичок, первый забег шёл бы по другим правилам, чем все
+    // следующие, и таблица рекордов сравнивала бы несравнимое.
+    unlocked.clear();
+    teach.queue.length = 0; teach.key = null; teach.after = null;
     stage = 0; stageSpawned = 0; poolDry = false;
     lap = mods.lap;
     used.clear(); dropBag();
@@ -13091,6 +13196,18 @@
     cannonX = W / 2; cooldown = 0;
     held.left = held.right = false;
     if (startNow) {
+      // ЗАБЕГ НАЧИНАЕТСЯ ПУСТЫМ. stockUp() здесь оставлен нарочно и на старте
+      // ничего не выдаёт: открытых слотов ещё нет, а правило «выдаётся только
+      // открытое» одно на все три места выдачи. Обойма приходит по нужде, см.
+      // TEACH и checkUnlocks.
+      //
+      // Замер ниже сделан до этого и описывает то, что было: полная обойма на
+      // старте против выбора одной строки. Он остаётся в силе как мера того,
+      // сколько стоит ОПОЗДАВШИЙ запас, — и ровно поэтому выдача переехала на
+      // нужду, а не на счёт решённых слов: у слабого игрока нужда наступает
+      // раньше, значит и запас он получает раньше.
+      //
+      // Прежний текст:
       // Обойма выдаётся целиком и без экрана. Раздача здесь стояла и убрана:
       // на старте все три кошелька пусты, выбирать нечем — состояния, на которое
       // выбор мог бы опереться, ещё нет, и «взять снаряды или подсказки» решается
@@ -13523,11 +13640,17 @@
   // просто молча подросли, пока игрок читает улучшения.
   const draft = { kind: "supply", index: 0, title: "", cards: [], stocked: false };
 
-  const draftRows = () => draft.kind === "upgrade" ? draft.cards.length : SUPPLIES.length;
+  const draftRows = () =>
+    draft.kind === "upgrade" ? draft.cards.length : openSupplies().length;
 
   const upgradesLeft = () => UPGRADES.filter(u => !taken.has(u.id));
 
+  // Пополнять нечего, пока не открыт ни один слот: экран с нулём строк был бы
+  // остановкой без выбора. Такое бывает ровно на границе первого этапа у
+  // игрока, который прошёл его, ни разу не промахнувшись и не пустив блок до
+  // половины поля, — то есть у очень хорошего.
   function openDraft(title) {
+    if (!openSupplies().length) { state = "play"; return; }
     draft.kind = "supply";
     draft.index = 0;
     draft.title = title;
@@ -13559,15 +13682,17 @@
   }
 
   // Полная порция каждого слота разом — старт забега и награда за круг, оба раза
-  // без выбора.
-  const stockUp = () => SUPPLIES.forEach(stock);
+  // без выбора. Только по открытым слотам: на старте забега открытых нет вовсе,
+  // и вызов там остался пустым по существу, а не убран, — правило одно на оба
+  // места, и если открытие когда-нибудь переедет раньше, менять его не придётся.
+  const stockUp = () => openSupplies().forEach(stock);
 
   // Сообщения «+3 снаряда» после выбора здесь нет намеренно: игрок только что
   // сам ткнул в эту строку, а прибавку видно в кошельке справа. Надпись лишь
   // затирала то, что стояло в панели до раздачи, — правила начавшегося этапа,
   // которые как раз и надо прочесть. Вспышка остаётся: она говорит «принято».
   function takeSupply(i) {
-    stock(SUPPLIES[i]);
+    stock(openSupplies()[i]);
     state = "play";
     flash = 0.6;
     syncHud();
@@ -13850,6 +13975,14 @@
 
   function wrongLetter(b, letter, cell) {
     b.strikes++;
+    // Промах буквой — первая нужда в подсказке, и она наступает раньше любой
+    // беды на поле. Открывается здесь, а не в miss(): miss зовут ещё и удар в
+    // испорченное слово, и промах мимо ячейки при точном прицеле, и выстрел в
+    // молоко — это не «выстрелил не той буквой».
+    //
+    // Первый промах слово ещё не ломает (STRIKES_TO_BREAK = 2), так что
+    // подсказка приходит, пока слово можно собрать, и тратится на него же.
+    unlock("tips");
     const i = cell !== -1 ? cell : b.gaps.find(g => !b.shown[g]);
     if (b.strikes < STRIKES_TO_BREAK || i === undefined) {
       miss(b);
@@ -13898,7 +14031,25 @@
     dropBag();
     flash = 1;
     syncHud();
-    openDraft(`ЭТАП ${stage} ПРОЙДЕН!`);  // stage уже увеличен, пройден предыдущий
+    const title = `ЭТАП ${stage} ПРОЙДЕН!`;   // stage уже увеличен, пройден предыдущий
+
+    // СТРАХОВКА ЛЕСТНИЦЫ. Что не открылось само — открывается здесь. Условие
+    // ниже истинно только на первой границе забега: дальше открывать нечего.
+    //
+    // Без неё лестница молча обворовывает игрока, и хуже всего — умелого.
+    // Слот открывает нужда, а у того, кто решает слова высоко, нужда в первом
+    // этапе не наступает вовсе: блок до половины поля не доезжает. Раздача же
+    // предлагает только открытые слоты, и при всех закрытых её не бывает — то
+    // есть пройденная граница не платит ничего и обратно не приходит.
+    // Замерено, 16 сидов: раздач за забег 6.13 → 4.94 у быстрого, 2.06 → 1.75
+    // у медленного, очки 173 893 → 144 193 и 19 352 → 12 838.
+    //
+    // Место выбрано то же, что у раздачи: поле чистое, забег стоит, читать
+    // объяснение не мешает ничто. Окна идут ПЕРЕД раздачей — она ждёт своей
+    // очереди через teach.after.
+    for (const s of SUPPLIES) if (!unlocked.has(s.key)) unlock(s.key);
+    if (state === "teach") teach.after = () => openDraft(title);
+    else openDraft(title);
   }
 
   // Все этапы пройдены — забег заходит на новый круг, весь целиком и быстрее.
@@ -14083,6 +14234,10 @@
     for (const b of blocks) {
       if (alive(b) && b.y + b.h >= DANGER_Y) loseLife(b);
     }
+    // Проверка нужды стоит после падения и до выстрелов: слот открывается тем
+    // положением поля, которое игрок видит сейчас. Окно останавливает мир, но
+    // кадр доигрывается до конца — блоки уже сдвинуты, снаряды долетят.
+    checkUnlocks();
 
     for (let i = shots.length - 1; i >= 0; i--) {
       if (flyShot(shots[i], dt)) shots.splice(i, 1);
@@ -14327,6 +14482,7 @@
 
     if (inMenu) drawMenu();
     if (state === "draft" && !inMenu) drawDraft();
+    if (state === "teach" && !inMenu) drawTeach();
     // Вывески «PAUSE» больше нет: пауза поднимает меню, и оно само себя рисует.
     // Под открытым меню ни конец забега, ни приглашение демо не рисуем: меню
     // кроет середину экрана, они бы столкнулись.
@@ -14339,7 +14495,8 @@
     // На раздаче приглашение молчит: там сейчас выбирает бот, и это интереснее.
     // На конце забега — тоже: приглашение стоит в середине экрана, ровно там же,
     // где теперь таблица, и они бы наложились. Про кнопку GAME OVER скажет сам.
-    if (attract && !inMenu && state !== "draft" && state !== "over") drawAttract();
+    if (attract && !inMenu && state !== "draft" && state !== "teach"
+        && state !== "over") drawAttract();
 
     ctx.restore();
   }
@@ -15009,6 +15166,55 @@
       ctx.lineTo(x - s * .1, y + s * .06);
       ctx.stroke();
     },
+
+    // Иконки трёх слотов обоймы. Ключи с id улучшений не пересекаются, поэтому
+    // лежат в том же наборе: примитивы холста рисуются в одном месте, и второй
+    // такой набор разъехался бы с первым по стилю на первой же правке.
+    tips(x, y, s) {                                   // реплика с вопросом
+      ctx.strokeRect(x - s * .4, y - s * .4, s * .8, s * .58);
+      ctx.beginPath();
+      ctx.moveTo(x - s * .16, y + s * .18);           // хвостик реплики
+      ctx.lineTo(x - s * .1, y + s * .44);
+      ctx.lineTo(x + s * .1, y + s * .18);
+      // сам знак: крючок, ножка и точка под ней
+      ctx.moveTo(x - s * .13, y - s * .18);
+      ctx.arc(x, y - s * .18, s * .13, Math.PI, Math.PI * 2.3);
+      ctx.moveTo(x + s * .06, y - s * .06);
+      ctx.lineTo(x + s * .01, y + s * .02);
+      ctx.stroke();
+      ctx.fillRect(x - s * .02, y + s * .07, s * .05, s * .05);
+    },
+    shells(x, y, s) {                                 // снаряд, летящий вверх
+      ctx.beginPath();
+      ctx.moveTo(x, y - s * .44);                     // нос
+      ctx.lineTo(x + s * .17, y - s * .12);
+      ctx.lineTo(x + s * .17, y + s * .2);
+      ctx.lineTo(x - s * .17, y + s * .2);
+      ctx.lineTo(x - s * .17, y - s * .12);
+      ctx.closePath();
+      ctx.stroke();
+      ctx.beginPath();                                // след
+      for (const dx of [-.3, 0, .3]) {
+        ctx.moveTo(x + s * dx, y + s * (dx ? .3 : .28));
+        ctx.lineTo(x + s * dx, y + s * (dx ? .44 : .46));
+      }
+      ctx.stroke();
+    },
+    bombs(x, y, s) {                                  // круг с фитилём и искрой
+      ctx.beginPath();
+      ctx.arc(x, y + s * .12, s * .3, 0, 7);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(x + s * .14, y - s * .12);
+      ctx.quadraticCurveTo(x + s * .36, y - s * .3, x + s * .3, y - s * .42);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(x + s * .18, y - s * .42);
+      ctx.lineTo(x + s * .42, y - s * .42);
+      ctx.moveTo(x + s * .3, y - s * .3);
+      ctx.lineTo(x + s * .3, y - s * .54);
+      ctx.stroke();
+    },
   };
 
   // Экран раздачи. Строки в одну фразу: игра и так нагружает чтение, и абзац
@@ -15061,7 +15267,7 @@
     // прошедшем, а не указание. Указание — последней строкой, вплотную к рядам.
     if (draft.stocked) {
       ctx.font = "bold 13px 'Courier New', monospace";
-      ctx.fillText(SUPPLIES.map(s => `+${s.n} ${s.one}`).join(" · "),
+      ctx.fillText(openSupplies().map(s => `+${s.n} ${s.one}`).join(" · "),
                    W / 2, top + 68);
     }
     ctx.font = "13px 'Courier New', monospace";
@@ -15083,13 +15289,63 @@
       const fg = on ? "#9ead86" : INK;
       ctx.fillStyle = fg;
       if (up) drawUpgradeRow(draft.cards[i], r, i, fg);
-      else drawSupplyRow(SUPPLIES[i], r, i);
+      else drawSupplyRow(openSupplies()[i], r, i);
     }
 
     ctx.fillStyle = INK;
     ctx.textAlign = "center";
     ctx.font = "12px 'Courier New', monospace";
     ctx.fillText("1 2 3 или ↑ ↓ и ENTER", W / 2, bottom - 18);
+  }
+
+  // Окно открытия слота. Кроет ВЕСЬ экран, и это не размашистость: мир на нём
+  // стоит, а видимое поле означало бы бесплатное время на чтение падающих слов
+  // — то есть окно покупало бы игроку игровое время. Правило «показ не берёт
+  // игрового времени» держится ровно этой заливкой, и проверять его надо так:
+  // поставить TEACH_READ в 0, 2.4 и 8 секунд, числа обязаны совпасть до знака.
+  //
+  // Картинка обязательна: слоты базовые, и объяснять их надписью «ПКМ читает
+  // толкование» в строке раздачи — это объяснять кнопку тому, кто ещё не знает,
+  // что у него есть кнопка.
+  const TEACH_BOX = 320;
+
+  function drawTeach() {
+    const t = TEACH.find(x => x.key === teach.key);
+    if (!t) return;
+    const top = (H - TEACH_BOX) / 2, cx = W / 2;
+
+    ctx.fillStyle = "rgba(158,173,134,.98)";
+    ctx.fillRect(0, 0, W, H);
+    ctx.strokeStyle = INK; ctx.lineWidth = 2;
+    ctx.strokeRect(20, top, W - 40, TEACH_BOX);
+
+    ctx.fillStyle = INK;
+    ctx.textAlign = "center";
+    ctx.font = "13px 'Courier New', monospace";
+    ctx.fillText("ОТКРЫТО", cx, top + 32);
+
+    ctx.strokeStyle = INK; ctx.lineWidth = 2.5;
+    ICONS[t.key](cx, top + 96, 76);
+
+    ctx.fillStyle = INK;
+    ctx.font = "bold 26px 'Courier New', monospace";
+    ctx.fillText(t.label, cx, top + 178);
+    ctx.font = "bold 15px 'Courier New', monospace";
+    ctx.fillText("+" + supplyOf(t.key).n, cx, top + 202);
+
+    // Зачем — обычным, как — жирным: кнопку игрок будет искать глазами.
+    ctx.font = "13px 'Courier New', monospace";
+    ctx.fillText(t.why, cx, top + 234);
+    ctx.font = "bold 13px 'Courier New', monospace";
+    ctx.fillText(t.how, cx, top + 256);
+
+    ctx.globalAlpha = .7;
+    ctx.font = "12px 'Courier New', monospace";
+    ctx.fillText(TEACH_FOOT, cx, top + 282);
+    ctx.globalAlpha = 1;
+
+    ctx.font = "12px 'Courier New', monospace";
+    ctx.fillText("ENTER или клик — продолжить", cx, top + 306);
   }
 
   function drawSupplyRow(s, r, i) {
@@ -15168,6 +15424,12 @@
       bombs: "◆".repeat(bombs) || "—",
       tips: mods.freeTips ? "∞" : ("?".repeat(tips) || "—"),
       shells: String(shells),
+      // Какие слоты уже открыты. Закрытый не показывается вовсе: забег
+      // начинается пустым, и кошелёк, в котором никогда ничего не было,
+      // читается как поломка панели, а не как «этого у тебя пока нет».
+      // Появление строки при этом само становится событием.
+      open: { bombs: unlocked.has("bombs"), tips: unlocked.has("tips"),
+              shells: unlocked.has("shells") },
       // Техническая сводка — списком строк, а не готовой разметкой: перевод
       // строки это дело вида, а не правил. Пока скрыта, не собираем вовсе.
       rules: showRules ? rulesView() : null,
@@ -15221,6 +15483,13 @@
     el.bombs.textContent = v.bombs;
     el.tips.textContent = v.tips;
     el.shells.textContent = v.shells;
+    // Слот прячется вместе со своей меткой, иначе от закрытого запаса на панели
+    // оставалось бы висящее в воздухе слово.
+    for (const k of ["bombs", "tips", "shells"]) {
+      const show = v.open[k] ? "" : "none";
+      el[k].style.display = show;
+      el[k + "Label"].style.display = show;
+    }
     el.rules.style.display = v.rules ? "block" : "none";
     if (v.rules) el.rules.innerHTML = v.rules.join("<br>");
   }
@@ -15255,6 +15524,16 @@
     // в меню Escape отдан навигации: он возвращает из модификаторов
     if (inMenu) {
       if (menuKey(e)) e.preventDefault();
+      return;
+    }
+
+    // Окно открытия слота закрывается только ENTER'ом и кликом. Пробелом и
+    // буквами — нарочно нет: окно встаёт посреди боя, и игрок, который в этот
+    // момент дострелывает слово, смахнул бы объяснение случайным нажатием, ни
+    // разу его не увидев. Escape не выпускает по той же причине, что и на
+    // раздаче.
+    if (state === "teach") {
+      if (e.key === "Enter") { e.preventDefault(); nextTeach(); }
       return;
     }
 
@@ -15326,6 +15605,7 @@
       if (i !== -1) draft.index = i;
       return;                                // пушку раздача не двигает
     }
+    if (state === "teach") return;           // и окно обучения тоже
     cannonX = Math.max(16, Math.min(W - 16, p.x));
     held.left = held.right = false;
   });
@@ -15345,10 +15625,14 @@
       if (i !== -1) { menu.index = i; menuItems()[i].act(); }
       return;
     }
+    // Клик по окну обучения — где угодно: попадать в него некуда, это не выбор.
+    if (state === "teach") { nextTeach(); return; }
     if (state === "draft") {
       const p = canvasPos(e);
       const i = draftAt(p.x, p.y);
-      if (i !== -1) { draft.index = i; takeSupply(i); }
+      // takePick, а не takeSupply: мышью выбирают и улучшение тоже, а прежний
+      // вызов на экране улучшений выдавал строку обоймы по номеру карточки.
+      if (i !== -1) { draft.index = i; takePick(i); }
       return;
     }
     if (state === "over") { toMenu(); return; }
@@ -15703,6 +15987,17 @@
     const DRAFT_SLOW = 1.45;
     let draftT = 0, draftPick = -1;
 
+    // Окно открытия слота бот закрывает сам, иначе демо встало бы на первом же
+    // промахе. Время — на зрителя: успеть увидеть картинку и обе строки. Игрового
+    // времени это не стоит вовсе, мир на окне не идёт, — плата только кадрами.
+    const TEACH_READ = 2.4;       // с
+    let teachT = 0;
+
+    function teachStep(dt) {
+      teachT += dt;
+      if (teachT >= TEACH_READ) { teachT = 0; nextTeach(); }
+    }
+
     function draftStep(dt) {
       const slow = draft.kind === "upgrade" ? DRAFT_SLOW : 1;
       draftT += dt;
@@ -15735,16 +16030,24 @@
         return Math.min(draft.cards.length - 1,
                         Math.floor(draftRnd() * draft.cards.length));
       }
-      let i = { shells: 0, bombs: 1, tips: 2 }[P.draft] || 0;
+      // Политика называет КЛЮЧ, а не номер строки. Номер в SUPPLIES и номер на
+      // экране совпадают только пока открыты все три слота: закрытых в раздаче
+      // нет вовсе, и «взять снаряды» по индексу 0 попало бы в подсказки.
+      const order = ["shells", "bombs", "tips"];
+      let key = order.includes(P.draft) ? P.draft : order[0];
       if (P.draft === "need") {
         // Только то, чем политика разрешает пользоваться: иначе выключенный
         // кошелёк наказывает дважды — стрелять нельзя и выбор съеден.
-        const can = [P.shell, P.bomb !== false, P.hint];
-        const want = [shells === 0, bombs === 0, tips === 0];
-        i = can.findIndex((ok, k) => ok && want[k]);
-        if (i === -1) i = Math.max(0, can.findIndex(Boolean));
+        const can = { shells: P.shell, bombs: P.bomb !== false, tips: P.hint };
+        const have = { shells, bombs, tips };
+        key = order.find(k => can[k] && have[k] === 0)
+           || order.find(k => can[k]) || order[0];
       }
-      return i;
+      const rows = openSupplies();
+      const at = rows.findIndex(s => s.key === key);
+      // Нужного слота может не быть на экране — он ещё не открыт. Берём первую
+      // строку: отказаться от раздачи бот не умеет, да и незачем.
+      return at === -1 ? 0 : at;
     }
 
     function act() {
@@ -15902,8 +16205,10 @@
     return {
       stats,
       tick(dt) {
+        if (state === "teach") { teachStep(dt); return; }   // окно тоже морозит
         if (state === "draft") { draftStep(dt); return; }   // раздача морозит игру
         draftT = 0; draftPick = -1;      // экран закрылся — часы выбора заново
+        teachT = 0;
         if (state !== "play") return;
 
         // Пушка в пути. Рука едет со своей скоростью, и это не только вид: пока

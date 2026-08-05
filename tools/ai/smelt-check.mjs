@@ -14,6 +14,9 @@ const ok = (n, c) => { console.log((c ? "ok   " : "ПЛОХО") + "  " + n); if 
 function ready(seed, { smelt = true, stage = 0, others = 1 } = {}) {
   const g = boot(seed);
   g.reset(true);
+  // Забег начинается с закрытой обоймой, а стенду нужен снос. Открываем слот
+  // тем же путём, что и игра, — окно харнесс закроет сам на первом же update.
+  g.unlock("shells");
   if (smelt) g.taken.add("smelt");
   g.stage = stage;
   for (let i = 0; i < 3000; i++) {

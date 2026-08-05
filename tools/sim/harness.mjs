@@ -95,6 +95,14 @@ export function boot(seed = 1) {
     // — пустая обойма и выбор одной строки — и сравнить её с нынешней. См.
     // tools/ai/start-probe.mjs.
     openDraft, SUPPLIES,
+    // ---- обучение: слоты обоймы закрыты и открываются по нужде -------------
+    // Забег начинается с пустой и ЗАКРЫТОЙ обоймой; слот открывается в момент,
+    // когда его нужда впервые появилась на поле. openSupplies() — то, что видит
+    // раздача: закрытых слотов в ней нет вовсе.
+    unlock, nextTeach, checkUnlocks, openSupplies, drawTeach,
+    TEACH, TEACH_FOOT, TEACH_BOX, HALF_Y,
+    get unlocked() { return unlocked; },
+    get teach() { return teach; },
     // Геометрия панели раздачи. Шапка растёт, когда за круг пришла обойма, и
     // стенду нужны настоящие числа игры, а не их копия: разъехавшаяся шапка
     // сдвигает и попадание мышью, потому что draftAt считает по draftRect.
@@ -258,5 +266,24 @@ export function boot(seed = 1) {
   // Читать — api.draws.
   api.record = on => { recording = !!on; if (on) draws.length = 0; };
   api.draws = draws;
+
+  // Окно открытия слота останавливает мир и ждёт ENTER. Ни одна гонялка и ни
+  // один стенд ENTER не жмут, так что первый же промах вешал бы прогон навсегда:
+  // update молчит, блоки стоят, условие выхода не наступает никогда.
+  //
+  // Поэтому харнесс закрывает окно сам, перед каждым шагом. Игрового времени
+  // это не меняет вовсе — на окне мир и так стоит, — а замер получает ту же
+  // выдачу в тот же момент, что и живой игрок. Стенду самого обучения такое
+  // мешает, и он снимает autoTeach.
+  api.autoTeach = true;
+  const skipTeach = () => {
+    if (!api.autoTeach) return;
+    let guard = 8;                       // очередь короче трёх, но зацикливаться не дадим
+    while (api.state === "teach" && guard-- > 0) api.nextTeach();
+  };
+  for (const name of ["update", "frame"]) {
+    const raw = api[name];
+    api[name] = arg => { skipTeach(); return raw(arg); };
+  }
   return api;
 }
