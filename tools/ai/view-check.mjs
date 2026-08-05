@@ -16,7 +16,7 @@ const ok = (n, c) => { console.log((c ? "ok   " : "ПЛОХО") + "  " + n); if 
 const g = boot(7);
 
 // ---- 1. hudView() это простые строки, без разметки и без DOM -----------------
-g.reset(true); g.takePick(0);
+g.reset(true);
 for (let i = 0; i < 240; i++) g.update(DT);
 const v = g.hudView();
 const keys = ["score", "lap", "stage", "words", "combo", "lives", "bombs", "shells"];
@@ -64,7 +64,7 @@ g.measure = (text, font) => { asked++; return real(text, font); };
 // Подсказка — единственный потребитель меры. Кошелёк здесь не при чём, поэтому
 // подсказки бесплатные: проверяется разбивка, а не оплата. Пушку наводим на
 // живой блок сами — hint() берёт слово из своей колонки.
-g.reset(true); g.takePick(0);
+g.reset(true);
 g.mods.freeTips = true;
 for (let i = 0; i < 900 && !asked; i++) {
   g.update(DT);

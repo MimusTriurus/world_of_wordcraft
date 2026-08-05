@@ -13,7 +13,7 @@ const ok = (n, c) => { console.log((c ? "ok   " : "ПЛОХО") + "  " + n); if 
 // Забег, доведённый до состояния «есть блок под пушкой и есть соседи».
 function ready(seed, { smelt = true, stage = 0, others = 1 } = {}) {
   const g = boot(seed);
-  g.reset(true); g.takePick(0);
+  g.reset(true);
   if (smelt) g.taken.add("smelt");
   g.stage = stage;
   for (let i = 0; i < 3000; i++) {

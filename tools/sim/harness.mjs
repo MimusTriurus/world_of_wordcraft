@@ -72,6 +72,10 @@ export function boot(seed = 1) {
     // выстрелами и сжигают комбо ровно так же, как у человека. Всё, что мимо,
     // — это уже не измерение игры, а измерение чего-то другого.
     shootLetter, shootBlock, dropBomb, hint, takePick, draftRows,
+    // Экран раздачи и порции. Нужны, чтобы поднять обратно прежнюю схему старта
+    // — пустая обойма и выбор одной строки — и сравнить её с нынешней. См.
+    // tools/ai/start-probe.mjs.
+    openDraft, SUPPLIES,
     // Подсказки на поле: карточка теперь не мгновенна, сперва по слову проходит
     // луч. Снаряды в воздухе уже отдаются ниже, вместе с остальным стволом, — и
     // снос сноса теперь тоже летит, а не срабатывает на месте.
@@ -96,7 +100,10 @@ export function boot(seed = 1) {
     get cannonX() { return cannonX; }, set cannonX(v) { cannonX = v; },
     get cooldown() { return cooldown; },
     get shots() { return shots; },
-    get shells() { return shells; },  get tips() { return tips; },
+    // Кошельки пишутся только затем, чтобы отменить стартовую выдачу и померить
+    // прежнюю схему. В самой игре прибавка живёт в одном месте, stock().
+    get shells() { return shells; },  set shells(v) { shells = v; },
+    get tips() { return tips; },      set tips(v) { tips = v; },
     get lap() { return lap; },
     get stageSpawned() { return stageSpawned; },
     get poolDry() { return poolDry; },

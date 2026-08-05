@@ -13,7 +13,7 @@ const ok = (n, c) => { console.log((c ? "ok   " : "ПЛОХО") + "  " + n); if 
 // Довести забег до живого блока, до которого достаёт пушка.
 function ready(seed) {
   const g = boot(seed);
-  g.reset(true); g.takePick(0);
+  g.reset(true);
   for (let i = 0; i < 1200; i++) {
     g.update(DT);
     const b = g.blocks.find(x => x.state === "live" && x.y + x.h > 60 &&

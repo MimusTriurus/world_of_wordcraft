@@ -27,7 +27,7 @@ const pick = label => {                 // навести курсор и наж
 };
 
 // ---- 1. Escape в игре поднимает меню паузы ----------------------------------
-g.reset(true); g.takePick(0);
+g.reset(true);
 run(120);
 ok(`забег идёт (${g.state})`, g.state === "play");
 g.key("Escape");
@@ -66,9 +66,12 @@ ok("«Продолжить» тоже", g.state === "play" && g.inMenu === false
 
 // ---- 4. «Начать заново» и «Выйти» -------------------------------------------
 g.key("Escape"); pick("Начать заново");
+// Экрана раздачи на старте нет: обойма выдаётся целиком, забег начинается сразу.
 ok("«Начать заново» начало забег", g.inMenu === false && g.attract === false &&
-   g.lives === 3 && g.state === "draft");
-g.takePick(0); run(60);
+   g.lives === 3 && g.state === "play");
+ok("обойма на старте полная",
+   g.shells === 3 && g.bombs === 1 && g.tips === 2);
+run(60);
 g.key("Escape"); pick("Выйти");
 ok("«Выйти» включило демо без меню",
    g.attract === true && g.inMenu === false && g.lap === g.ATTRACT_LAP);
@@ -83,7 +86,7 @@ g.key("Escape");
 ok("из корня Escape вернул в корень", g.menu.screen === "root");
 
 // ---- 6. экран конца забега показывает таблицу --------------------------------
-g.reset(true); g.takePick(0);
+g.reset(true);
 run(60);
 g.score = 12345;
 g.lives = 1;

@@ -11,7 +11,7 @@ const ok = (n, c) => { console.log((c ? "ok   " : "ПЛОХО") + "  " + n); if 
 
 function ready(seed, minY = 60, stage = 0) {
   const g = boot(seed);
-  g.reset(true); g.takePick(0);
+  g.reset(true);
   g.stage = stage;                 // этап задаёт длину слов: 0 — короткие, 2 — длинные
   for (let i = 0; i < 1500; i++) {
     g.update(DT);
