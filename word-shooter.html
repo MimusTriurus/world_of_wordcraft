@@ -14272,7 +14272,13 @@
     ctx.font = `bold ${ATTRACT_SIZE}px 'Courier New', monospace`;
     const bw = Math.min(W - 20, ctx.measureText(big).width + 44);
     const bh = ATTRACT_SIZE * 2;
-    const bx = (W - bw) / 2, by = DANGER_Y - 14 - bh;
+    // Середина экрана — там же, где banner() рисует «GAME OVER» и где встаёт
+    // меню: все большие надписи держатся одной высоты. Раньше приглашение сидело
+    // над линией смерти, у самого низа, и в углу его было легко не заметить.
+    //
+    // Падающие слова оно при этом собой закрывает — рамка непрозрачная. Так и
+    // задумано: это демо, смотреть в нём надо на приглашение, а не на счёт.
+    const bx = (W - bw) / 2, by = (H - bh) / 2;
 
     if ((attractT % ATTRACT_BLINK) / ATTRACT_BLINK < ATTRACT_DUTY) {
       ctx.fillStyle = "#9ead86";
