@@ -76,8 +76,22 @@ export function boot(seed = 1) {
     // луч. Снаряды в воздухе уже отдаются ниже, вместе с остальным стволом, — и
     // снос сноса теперь тоже летит, а не срабатывает на месте.
     get hints() { return hints; },
-    SCAN_TIME,
-    W, H, CANNON_SPEED, SHOT_SPEED, SHOT_COOLDOWN, MAX_SHOTS, STRIKES_TO_BREAK,
+    // Осколки снесённого слова: буквы разлетаются и бьются о другие блоки.
+    get shards() { return shards; },
+    get sparks() { return sparks; },
+    SCAN_TIME, SHARD_MAX, SHARD_SPEED,
+    // Взятые за забег улучшения. Тринадцать из четырнадцати — заглушки, но
+    // ПЕРЕПЛАВКА работает, и стендам нужно её включать.
+    taken, UPGRADES, cellCenter,
+    // Иконки улучшений. Стенду нужны, чтобы ловить пункт без иконки: рисуются
+    // они примитивами холста, и отсутствие валит весь экран раздачи.
+    ICONS,
+    W, H, CANNON_SPEED, SHOT_COOLDOWN, MAX_SHOTS, STRIKES_TO_BREAK,
+    // Показ выстрела у дула. Отдельный список и отдельные часы: буква улетает
+    // сразу, показ живёт параллельно и игрового времени не занимает.
+    MUZZLE_SHOW, MUZZLE_KEEP, SHOT_FAST, SHOT_BIG, SHOT_SMALL, SHOT_Y0,
+    SHELL_SPEED,
+    get muzzles() { return muzzles; },
     speedNow, loadMul, loadNow, mods, draft, glossOf,
     get cannonX() { return cannonX; }, set cannonX(v) { cannonX = v; },
     get cooldown() { return cooldown; },
