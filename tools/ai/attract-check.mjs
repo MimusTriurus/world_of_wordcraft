@@ -69,20 +69,34 @@ ok("drawAttract не падает", true);
   ok(`не задевает линию смерти (${(by + bh).toFixed(0)} против ${g.DANGER_Y})`,
      by + bh < g.DANGER_Y);
 
-  // На раздаче приглашение уезжает в полосу НАД панелью: обе вещи центрированы
-  // по высоте, и на месте им вдвоём тесно. Проверяем самый высокий из экранов —
-  // улучшение с пришедшей за круг обоймой: у него полоса сверху самая узкая.
+  // Место у приглашения одно на все состояния, и оно рисуется поверх любого
+  // окна. Проверяется журналом холста: рамка приглашения должна лечь ПОСЛЕ
+  // панели раздачи и на той же высоте, что и в обычной игре. Прыгающая надпись
+  // читается как сбой, а молчащая — как «демо кончилось».
   const wasKind = g.draft.kind, wasStocked = g.draft.stocked, wasState = g.state;
-  g.draft.kind = "upgrade";
-  g.draft.stocked = true;
-  g.draft.cards = g.UPGRADES.slice(0, 3);
-  g.state = "draft";
-  const dy = Math.max(6, g.draftTop() - bh - 10);
-  ok(`на раздаче приглашение на ${dy.toFixed(0)}, панель с ${g.draftTop()}`,
-     dy + bh <= g.draftTop());
-  ok(`и не уехало за верх экрана (${dy.toFixed(0)})`, dy >= 0);
-  g.drawAttract();
-  ok("drawAttract на раздаче не падает", true);
+  for (const kind of ["supply", "upgrade"]) {
+    g.draft.kind = kind;
+    g.draft.stocked = kind === "upgrade";
+    g.draft.cards = g.UPGRADES.slice(0, 3);
+    g.state = "draft";
+    // Мигание фиксируем на видимой фазе: иначе кадр может попасть в паузу.
+    while ((g.attractT % g.ATTRACT_BLINK) / g.ATTRACT_BLINK >= g.ATTRACT_DUTY) {
+      now += 1000 / 60; g.frame(now);
+    }
+    g.record(true);
+    g.draw();
+    g.record(false);
+    const rects = g.draws.filter(d => d.op === "rect");
+    const invite = rects.filter(d => Math.abs(d.w - (bw - 2)) < 2);
+    ok(`${kind}: рамка приглашения нарисована (${invite.length})`, invite.length === 1);
+    if (invite.length === 1) {
+      ok(`${kind}: на той же высоте, что и в игре (${invite[0].y.toFixed(0)} ≈ ${by + 1})`,
+         Math.abs(invite[0].y - (by + 1)) < 1);
+      const panel = rects.filter(d => Math.abs(d.w - g.W) < 1);
+      ok(`${kind}: панель раздачи нарисована раньше приглашения`,
+         panel.length > 0 && rects.indexOf(panel[0]) < rects.indexOf(invite[0]));
+    }
+  }
   g.draft.kind = wasKind; g.draft.stocked = wasStocked; g.state = wasState;
 }
 
