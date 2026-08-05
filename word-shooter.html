@@ -12530,10 +12530,11 @@
   // обычный "play" — иначе пришлось бы объяснять новое состояние всем, кто
   // смотрит на state, а отличается демо не правилами, а тем, что его никто не
   // просил и никуда не записывают.
-  // Место последнего забега в таблице рекордов, −1 — не попал. Живёт до конца
-  // следующего забега: его показывает экран GAME OVER. lastBot говорит, в какой
-  // из двух таблиц это место: у игрока и у бота они свои.
-  let lastPlace = -1, lastBot = false;
+  // Последний забег: его место в таблице своего языка (0-based, −1 — забега ещё не
+  // было), сама строка и кто играл. Живёт до конца следующего забега: всё это
+  // показывает экран GAME OVER. lastRow нужен отдельно от места, потому что забег
+  // мог не попасть в хранимую десятку, а показать его всё равно надо.
+  let lastPlace = -1, lastBot = false, lastRow = null;
   // Показывать ли техническую сводку в панели. Клавиша 0, между сессиями не
   // запоминается: это отладочный взгляд, а не настройка игры.
   let showRules = false;
@@ -12777,16 +12778,24 @@
   // бессмысленно. Помечаются и послабления (бесконечные подсказки),
   // и ужесточение: старт не с первого круга даёт множитель очков, которого
   // на общих основаниях пришлось бы добиваться игрой.
+  // Храним десять на язык, показываем пятёрку. Разница нужна: место забега
+  // считается по всей сохранённой таблице, и обрезав её до видимого, игра стала бы
+  // отвечать «шестое» на любой забег, не попавший в пятёрку.
   const BEST_MAX = 10;
-  // Бот считается отдельно, и это не косметика. Он играет заметно лучше живого
-  // человека — быстрый класс берёт 166 тысяч за забег, — так что в общей десятке
-  // он занял бы её целиком и вытеснил игрока из его же таблицы. Два счёта не
-  // конкурируют за одни и те же строки: своя десятка у игрока, своя тройка у
-  // бота. Тройка, потому что таблица бота — мерка, а не список достижений: демо
-  // играет само и без остановки, и десять почти одинаковых больших чисел ничего
-  // к мерке не добавляют. Заодно два блока по десять строк не влезли бы на экран
-  // рекордов: 680 px при холсте в 660.
-  const BOT_MAX = 3;
+  const BEST_SHOW = 5;
+  // Таблица одна на игрока и на бота. Бот играет заметно лучше человека — быстрый
+  // класс берёт 166 тысяч за забег, — так что пятёрку он, скорее всего, займёт
+  // целиком; на этом и держится смысл строки «твой забег» под ней. Она показывает
+  // место текущего прогона всегда, даже если до пятёрки он не дотянул, так что
+  // вытеснить игрока с экрана бот не может, только с пьедестала.
+  //
+  // Кто играл, помечает поле bot. Строки бота бледнее и подписаны — бледностью, а
+  // не цветом: красный занят испорченным словом.
+  //
+  // Языки считаются отдельно. Русский и английский корпуса дают разную цену слова
+  // и разную прощаемость, и одна таблица на два языка сравнивала бы несравнимое.
+  // Обрезка тоже по языку: десятка русских забегов не должна вытеснять английские.
+  const LANGS = ["ru", "en"];
   // Версия условий забега. Меняется, когда прежние строки перестают быть
   // сравнимыми с новыми: сперва слово стало оплачиваться по скорости (2),
   // затем обойма опустела и запасы переехали в раздачу (3), затем этапов
@@ -12794,26 +12803,31 @@
   // выдавать полную обойму вместо выбора одной строки (5). Одна таблица на
   // две шкалы врала бы вечно, поэтому старые строки отбрасываются.
   const BEST_VER = 5;
-  // Два хранилища и две таблицы. Версия у них общая: обе меряют один забег, и
-  // если условия перестали быть сравнимыми, то сразу для обоих.
-  function loadBest(key) {
-    try {
-      const raw = JSON.parse(localStorage.getItem(key) || "[]");
-      if (Array.isArray(raw))
-        return raw.filter(r => r && typeof r.score === "number" && r.v === BEST_VER);
-    } catch { /* испорченная запись — начинаем таблицу заново */ }
-    return [];
-  }
-  let records = loadBest("ws-best");
-  let botRecords = loadBest("ws-best-bot");
+  // Хранилище одно на все языки и на обоих игравших: разрез по языку делается при
+  // показе, а не при записи. Так строки, записанные до появления разреза, остаются
+  // читаемыми — язык в них был всегда.
+  let records = [];
+  try {
+    const raw = JSON.parse(localStorage.getItem("ws-best") || "[]");
+    if (Array.isArray(raw))
+      records = raw.filter(r => r && typeof r.score === "number" && r.v === BEST_VER);
+  } catch { /* испорченная запись — начинаем таблицу заново */ }
 
-  // Возвращает место в СВОЕЙ таблице (0-based) или -1, если забег в неё не попал.
-  // Чья это таблица, говорит lastBot: рамку своей строки рисовать надо в том
-  // блоке, куда забег и лёг.
+  const langOf = r => LANGS.includes(r.lang) ? r.lang : "ru";
+  // Таблица одного языка, от лучшего к худшему. Сортируется при чтении, а не
+  // хранится сортированной: строк десятки, а порядок нужен и для показа, и для
+  // подсчёта места, и две сортировки разъезжаются легче одной.
+  const bestOf = l => records.filter(r => langOf(r) === l)
+                            .sort((a, b) => b.score - a.score);
+
+  // Возвращает место забега в таблице своего языка, 0-based. Место считается ДО
+  // обрезки, поэтому оно осмысленно и у забега, не попавшего в хранимую десятку:
+  // одиннадцатый так и называется одиннадцатым, а не «никаким». Экран конца забега
+  // на этом и стоит — пятёрка лидеров, а под ней своя строка со своим номером.
   //
-  // Забег бота идёт в свою таблицу, а не в общую и не в никуда. Раньше он не
-  // записывался вовсе, и это была полумера: сравнить себя с ботом было нельзя,
-  // хотя демо крутит его забеги на глазах у игрока с первой секунды.
+  // Забег бота идёт в ту же таблицу. Раньше он не записывался вовсе, и это была
+  // полумера: сравнить себя с ботом было нельзя, хотя демо крутит его забеги на
+  // глазах у игрока с первой секунды.
   //
   // Звёздочка ставится и боту, и по той же причине: демо начинает с ATTRACT_LAP,
   // то есть с готовым множителем очков, которого на общих основаниях пришлось бы
@@ -12821,17 +12835,19 @@
   // слагаемое — mods.lap демо не трогает, оно ставит lap напрямую.
   function recordRun() {
     const bot = mods.autopilot || attract;
-    const row = { v: BEST_VER, score, lap, stage: stage + 1, solved, lang,
+    const row = { v: BEST_VER, score, lap, stage: stage + 1, solved, lang, bot,
                   easy: attract || mods.freeTips || mods.lap > 1 };
-    const table = bot ? botRecords : records;
-    table.push(row);
-    table.sort((a, b) => b.score - a.score);
-    table.length = Math.min(table.length, bot ? BOT_MAX : BEST_MAX);
-    try {
-      localStorage.setItem(bot ? "ws-best-bot" : "ws-best", JSON.stringify(table));
-    } catch { /* хранилище недоступно — таблица проживёт до перезагрузки */ }
+    records.push(row);
+    const place = bestOf(lang).indexOf(row);
+    // Обрезка по языку: десятка одного языка не должна выталкивать другой.
+    const keep = new Set();
+    for (const l of LANGS) bestOf(l).slice(0, BEST_MAX).forEach(r => keep.add(r));
+    records = records.filter(r => keep.has(r));
+    try { localStorage.setItem("ws-best", JSON.stringify(records)); }
+    catch { /* хранилище недоступно — таблица проживёт до перезагрузки */ }
     lastBot = bot;
-    return table.indexOf(row);
+    lastRow = row;
+    return place;
   }
 
   // -------------------------------------------------------------------- меню
@@ -12941,16 +12957,16 @@
   const MENU_STEP = 44, MENU_W = 300;
   const MENU_HEAD = 92, MENU_FOOT = 46;   // место под заголовок и подсказку
   const BEST_STEP = 26, BEST_HEAD = 30, BEST_W = 380;
-  const BEST_LABEL = 18, BEST_GAP = 12;   // подпись блока и просвет между блоками
+  const BEST_LABEL = 18, BEST_GAP = 12;   // подпись таблицы и отбивка своей строки
 
-  // Высота одного блока и обоих вместе. Считается от содержимого: пустая таблица
-  // занимает одну строку («пока пусто»), полная — свои десять или три. Шапка со
-  // именами столбцов одна на оба блока: столбцы у них те же, и второй раз она
-  // была бы повторением ради повторения — да и 30 px экрану дороги.
-  const blockH = (n, head) =>
-    BEST_LABEL + (head ? BEST_HEAD : 0) + Math.max(1, n) * BEST_STEP;
-  const recordsH = () =>
-    blockH(records.length, true) + BEST_GAP + blockH(botRecords.length, false);
+  // Сколько строк видно и нужна ли отдельная строка под пятёркой. Своя строка
+  // рисуется отдельно, только если в пятёрку забег не попал: иначе она бы стояла
+  // в таблице дважды.
+  const bestRows = () => Math.max(1, Math.min(BEST_SHOW, bestOf(lang).length));
+  const ownBelow = () => !!lastRow && langOf(lastRow) === lang &&
+                         lastPlace >= BEST_SHOW;
+  const recordsH = () => BEST_LABEL + BEST_HEAD + bestRows() * BEST_STEP +
+                         (ownBelow() ? BEST_GAP + BEST_STEP : 0);
 
   // Экран модификаторов вырос до девяти пунктов, а рекорды вставляют таблицу
   // между заголовком и пунктами, поэтому раскладка считается от содержимого,
@@ -13070,7 +13086,7 @@
     // каждой двери наружу — в языке, в старте забега, — и одну бы забыли:
     // приглашение осталось бы мигать поверх игры и глотать нажатия.
     attract = false; attractDead = 0; inMenu = false;
-    lastPlace = -1; lastBot = false;
+    lastPlace = -1; lastBot = false; lastRow = null;
     shake = 0; flash = 0;
     cannonX = W / 2; cooldown = 0;
     held.left = held.right = false;
@@ -14727,9 +14743,13 @@
   // Своя строка обведена рамкой, а не выделена цветом: красный помечает только
   // испорченное слово. Если забег в десятку не попал, обводить нечего.
   function drawGameOver() {
-    const h = 62 + recordsH() + 26;
+    // Сводки «круг · этап · очки · слов» над таблицей больше нет: ровно эти четыре
+    // числа стоят в своей строке таблицы, обведённой рамкой, — и там же рядом с
+    // чужими, то есть с тем, с чем их и надо сравнивать. Наверху они были копией,
+    // которой некуда деться при расхождении.
+    const h = 40 + recordsH() + 26;
     const top = Math.max(6, (H - h) / 2);
-    const tableY = top + 62;
+    const tableY = top + 40;
 
     ctx.fillStyle = "rgba(158,173,134,.94)";
     ctx.fillRect(0, top, W, h);
@@ -14741,15 +14761,11 @@
     ctx.textBaseline = "middle";
     ctx.textAlign = "center";
     ctx.fillStyle = INK;
-    ctx.font = "bold 30px 'Courier New', monospace";
-    ctx.fillText("GAME OVER", W / 2, top + 24);
-    ctx.font = "13px 'Courier New', monospace";
-    ctx.fillText((attract ? "демо · " : "") +
-                 `круг ${lap} · этап ${stage + 1} · очки ${score} · слов ${solved}`,
-                 W / 2, top + 48);
+    ctx.font = "bold 26px 'Courier New', monospace";
+    ctx.fillText(attract ? "GAME OVER · ДЕМО" : "GAME OVER", W / 2, top + 22);
 
-    // Рамку своей строки рисует сам блок таблицы: место у игрока и у бота
-    // считается каждое в своей, и снаружи её было бы некуда поставить.
+    // Рамку своей строки рисует сама строка: под пятёркой она стоит шестой по
+    // счёту, но со своим настоящим номером, и снаружи её было бы негде поймать.
     drawRecords(tableY);
 
     ctx.fillStyle = INK;
@@ -14760,41 +14776,29 @@
                          : "ENTER — в меню", W / 2, top + h - 13);
   }
 
-  // Оба счёта на одном экране: свои строки сверху и в полную силу, строки бота
-  // ниже и бледнее. Бледность, а не цвет: красным помечается только испорченное
-  // слово. Своя строка последнего забега обводится рамкой — в том блоке, куда
-  // забег и лёг, отсюда lastBot.
+  // Одна таблица на игрока и на бота, своя на каждый язык. Пятёрка лидеров, под ней
+  // — своя строка с настоящим номером, если в пятёрку забег не попал. Строки бота
+  // бледнее и подписаны: бледность, а не цвет, потому что красный занят испорченным
+  // словом. Своя строка обведена рамкой.
   function drawRecords(y) {
-    const own = blockH(records.length, true);
-    drawTable(y, records, "ИГРОК", true, 1, "Пока пусто — сыграй забег",
-              lastBot ? -1 : lastPlace);
-    drawTable(y + own + BEST_GAP, botRecords, "БОТ", false, 0.55,
-              "Пока пусто — посмотри демо", lastBot ? lastPlace : -1);
-  }
-
-  // Один блок таблицы. head — рисовать ли имена столбцов (шапка одна на оба
-  // блока), alpha — насколько блок бледен, place — какую строку обвести.
-  function drawTable(y, rows, label, head, alpha, empty, place) {
     const x = (W - BEST_W) / 2;
     const col = { rank: x + 6, score: x + 140, lap: x + 250, solved: x + 320,
-                  lang: x + BEST_W - 6 };
-    const top = y + BEST_LABEL + (head ? BEST_HEAD : 0);
+                  who: x + BEST_W - 6 };
+    const rows = bestOf(lang).slice(0, BEST_SHOW);
+    const top = y + BEST_LABEL + BEST_HEAD;
 
-    ctx.globalAlpha = alpha;
     ctx.fillStyle = INK;
     ctx.font = "bold 12px 'Courier New', monospace";
     ctx.textAlign = "left";
-    ctx.fillText(label, x + 6, y + 8);
+    ctx.fillText(`ЛУЧШИЕ · ${lang.toUpperCase()}`, x + 6, y + 8);
 
-    if (head) {
-      ctx.font = "12px 'Courier New', monospace";
-      const hy = y + BEST_LABEL + 14;
-      ctx.textAlign = "left";   ctx.fillText("#", col.rank, hy);
-      ctx.textAlign = "right";  ctx.fillText("ОЧКИ", col.score, hy);
-      ctx.textAlign = "center"; ctx.fillText("КРУГ/ЭТАП", col.lap, hy);
-      ctx.textAlign = "right";  ctx.fillText("СЛОВ", col.solved, hy);
-      ctx.textAlign = "right";  ctx.fillText("ЯЗ", col.lang, hy);
-    }
+    ctx.font = "12px 'Courier New', monospace";
+    const hy = y + BEST_LABEL + 14;
+    ctx.textAlign = "left";   ctx.fillText("#", col.rank, hy);
+    ctx.textAlign = "right";  ctx.fillText("ОЧКИ", col.score, hy);
+    ctx.textAlign = "center"; ctx.fillText("КРУГ/ЭТАП", col.lap, hy);
+    ctx.textAlign = "right";  ctx.fillText("СЛОВ", col.solved, hy);
+    ctx.textAlign = "right";  ctx.fillText("КТО", col.who, hy);
 
     ctx.strokeStyle = "rgba(43,49,34,.35)"; ctx.lineWidth = 1;
     ctx.beginPath();
@@ -14804,25 +14808,40 @@
     if (!rows.length) {
       ctx.textAlign = "center";
       ctx.font = "13px 'Courier New', monospace";
-      ctx.fillText(empty, W / 2, top + 16);
-      ctx.globalAlpha = 1;
+      ctx.fillText("Пока пусто — сыграй забег", W / 2, top + 16);
       return;
     }
 
-    rows.forEach((r, i) => {
-      const ry = top + i * BEST_STEP + 16;
-      ctx.font = "bold 14px 'Courier New', monospace";
-      ctx.textAlign = "left";   ctx.fillText(String(i + 1), col.rank, ry);
-      ctx.textAlign = "right";  ctx.fillText(r.score + (r.easy ? "*" : ""), col.score, ry);
-      ctx.font = "14px 'Courier New', monospace";
-      ctx.textAlign = "center"; ctx.fillText(r.lap + "/" + r.stage, col.lap, ry);
-      ctx.textAlign = "right";  ctx.fillText(String(r.solved), col.solved, ry);
-      ctx.font = "12px 'Courier New', monospace";
-      ctx.textAlign = "right";  ctx.fillText((r.lang || "ru").toUpperCase(), col.lang, ry);
-    });
+    rows.forEach((r, i) => bestRow(r, i, top + i * BEST_STEP + 16, col, x));
 
-    if (place >= 0 && place < rows.length) {
-      const ry = top + place * BEST_STEP + 16;
+    // Своя строка под пятёркой, за отбивкой: место настоящее, а не «шестое».
+    if (ownBelow()) {
+      const ry = top + BEST_SHOW * BEST_STEP + BEST_GAP + 16;
+      ctx.strokeStyle = "rgba(43,49,34,.35)"; ctx.lineWidth = 1;
+      ctx.setLineDash([3, 5]);
+      ctx.beginPath();
+      ctx.moveTo(x, ry - BEST_STEP / 2 - 4); ctx.lineTo(x + BEST_W, ry - BEST_STEP / 2 - 4);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      bestRow(lastRow, lastPlace, ry, col, x);
+    }
+  }
+
+  // Строка таблицы. Номер приходит отдельно от порядка: своя строка под пятёркой
+  // стоит шестой по счёту, а называется своим настоящим местом.
+  function bestRow(r, place, ry, col, x) {
+    const own = r === lastRow;
+    ctx.globalAlpha = r.bot ? 0.55 : 1;
+    ctx.fillStyle = INK;
+    ctx.font = "bold 14px 'Courier New', monospace";
+    ctx.textAlign = "left";   ctx.fillText(String(place + 1), col.rank, ry);
+    ctx.textAlign = "right";  ctx.fillText(r.score + (r.easy ? "*" : ""), col.score, ry);
+    ctx.font = "14px 'Courier New', monospace";
+    ctx.textAlign = "center"; ctx.fillText(r.lap + "/" + r.stage, col.lap, ry);
+    ctx.textAlign = "right";  ctx.fillText(String(r.solved), col.solved, ry);
+    ctx.font = "12px 'Courier New', monospace";
+    ctx.textAlign = "right";  ctx.fillText(r.bot ? "БОТ" : "ИГРОК", col.who, ry);
+    if (own) {
       ctx.strokeStyle = INK; ctx.lineWidth = 2;
       ctx.strokeRect(x - 5, ry - BEST_STEP / 2, BEST_W + 10, BEST_STEP);
     }

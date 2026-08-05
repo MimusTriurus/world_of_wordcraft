@@ -92,26 +92,25 @@ g.score = 12345;
 g.lives = 1;
 g.loseLife(g.blocks.find(b => b.state === "live") || g.blocks[0]);
 ok(`забег кончился (${g.state})`, g.state === "over");
-ok(`строк в таблице: ${g.records.length}`, g.records.length > 0);
+ok(`строк в таблице: ${g.bestOf(g.lang).length}`, g.bestOf(g.lang).length > 0);
 ok(`своё место запомнено: ${g.lastPlace}`, g.lastPlace >= 0);
-ok("и это таблица игрока, а не бота", g.lastBot === false);
+ok("и это забег игрока, а не бота", g.lastBot === false);
 g.drawGameOver();
 ok("drawGameOver не падает", true);
 g.draw();
 ok("draw на конце забега не падает", true);
 
-// Оба блока целиком укладываются в холст — и на конце забега, и в меню рекордов,
-// где над таблицей ещё заголовок, а под ней пункты. Высоту берём у игры: в
-// прошлый раз здесь стояла копия формулы, и она отставала от кода.
+// Таблица целиком укладывается в холст — и на конце забега, и в меню рекордов, где
+// над ней ещё заголовок, а под ней пункты. Высоту берём у игры: в прошлый раз
+// здесь стояла копия формулы, и она отставала от кода.
 {
-  // Худший случай: обе таблицы полны. Считаем блоки игровым blockH, а не своей
-  // копией формулы — в прошлый раз копия тут стояла и отставала от кода.
-  const worst = g.blockH(g.BEST_MAX, true) + g.BEST_GAP +
-                g.blockH(g.BOT_MAX, false);
-  ok(`сейчас таблицы ${g.recordsH()} px, в худшем случае ${worst}`,
+  // Худший случай: видна вся пятёрка и своя строка под ней.
+  const worst = g.BEST_LABEL + g.BEST_HEAD + g.BEST_SHOW * g.BEST_STEP +
+                g.BEST_GAP + g.BEST_STEP;
+  ok(`сейчас таблица ${g.recordsH()} px, в худшем случае ${worst}`,
      g.recordsH() <= worst);
-  ok(`экран конца забега ${62 + worst + 26} px из ${g.H}`,
-     62 + worst + 26 <= g.H - 12);
+  ok(`экран конца забега ${40 + worst + 26} px из ${g.H}`,
+     40 + worst + 26 <= g.H - 12);
   const MENU_HEAD = 92, MENU_STEP = 44, MENU_FOOT = 46;
   const best = MENU_HEAD + worst + g.SCREENS.best.length * MENU_STEP + MENU_FOOT;
   ok(`экран рекордов ${best} px из ${g.H}`, best <= g.H - 12);

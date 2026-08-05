@@ -193,14 +193,15 @@ export function boot(seed = 1) {
     get attract() { return attract; },
     get inMenu() { return inMenu; },
     get attractT() { return attractT; },
-    // Две таблицы рекордов: своя у игрока, своя у бота. lastBot говорит, в какой
-    // из них место последнего забега.
+    // Таблица рекордов одна на игрока и на бота, разрез по языку — при показе.
+    // bestOf(язык) отдаёт её отсортированной, как её и видит экран.
     get records() { return records; },
-    get botRecords() { return botRecords; },
+    bestOf, langOf, setLang,
     get lastPlace() { return lastPlace; },
     get lastBot() { return lastBot; },
-    BEST_MAX, BOT_MAX, BEST_STEP, BEST_LABEL, BEST_GAP, BEST_W,
-    recordsH, blockH, drawRecords,
+    get lastRow() { return lastRow; },
+    BEST_MAX, BEST_SHOW, BEST_STEP, BEST_LABEL, BEST_HEAD, BEST_GAP, BEST_W, LANGS,
+    recordsH, drawRecords, ownBelow,
     get autopilot() { return autopilot; },
     get lives() { return lives; },  set lives(v) { lives = v; },
     set score(v) { score = v; },
