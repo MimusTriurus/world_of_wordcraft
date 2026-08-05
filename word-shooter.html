@@ -12486,6 +12486,15 @@
   canvas.style.width = W + "px"; canvas.style.height = H + "px";
   ctx.scale(dpr, dpr);
 
+  // Мера текста. Единственное место, где правилам нужна отрисовка: подсказка
+  // разбивает толкование на строки по ширине карточки, а ширина строки известна
+  // только шрифту. Логика зовёт measure() и про холст не знает ничего; другой
+  // вид подменяет одну эту функцию.
+  let measure = (text, font) => {
+    ctx.font = font;
+    return ctx.measureText(text).width;
+  };
+
   const INK = "#2b3122";
   const RED = "#b03a2e";       // единственный цвет на монохромном экране:
                                // им помечено только испорченное слово
@@ -13528,6 +13537,9 @@
   const HINT_PER_LINE = 0.7;     // с на строку
   const HINT_FADE = 0.45;        // с — гаснет в самом конце
   const HINT_W = 260;
+  // Шрифт карточки. Раньше стоял двумя строками — в разбивке и в отрисовке; если
+  // бы они разошлись, подсказка вылезла бы за рамку.
+  const HINT_FONT = "13px 'Courier New', monospace";
   const glossOf = w => GLOSS[lang][w] || "";
 
   // Говорит ли толкование хоть что-нибудь. Однокоренные слова в статьях затёрты
@@ -13575,14 +13587,14 @@
   }
 
   // Разбивка на строки по ширине карточки. Меряем настоящим шрифтом карточки,
-  // иначе длинное толкование вылезет за рамку.
-  function wrapText(text, width) {
-    ctx.font = "13px 'Courier New', monospace";
+  // иначе длинное толкование вылезет за рамку. Мерит measure(), а не холст: см.
+  // объявление у холста.
+  function wrapText(text, width, font = HINT_FONT) {
     const out = [];
     let line = "";
     for (const word of text.split(" ")) {
       const next = line ? line + " " + word : word;
-      if (line && ctx.measureText(next).width > width) { out.push(line); line = word; }
+      if (line && measure(next, font) > width) { out.push(line); line = word; }
       else line = next;
     }
     if (line) out.push(line);
@@ -14065,7 +14077,7 @@
     roundRect(x, y, HINT_W, height, 6); ctx.stroke();
 
     ctx.fillStyle = INK;
-    ctx.font = "13px 'Courier New', monospace";
+    ctx.font = HINT_FONT;
     ctx.textAlign = "left";
     ctx.textBaseline = "middle";
     h.lines.forEach((line, i) =>
@@ -14545,9 +14557,15 @@
   }
 
   // -------------------------------------------------------------------- HUD
-  function syncHud() {
-    el.score.textContent = score;
-
+  // Разрезано на две части. hudView() собирает, что показывать, и ничего никуда
+  // не пишет — это просто объект строк. paintHud() раскладывает его по разметке
+  // и остаётся единственным местом игры, которое трогает DOM: другой вид панели
+  // меняет только его. Стендам при этом хватает hudView(), и им не нужен ни один
+  // элемент разметки.
+  //
+  // Зовётся всё равно через syncHud() из двух десятков мест: логика говорит
+  // «состояние изменилось», а не «нарисуй это вот так».
+  function hudView() {
     // Слова этапа — дробью, как этапы круга: сколько уже отработано из всех.
     // Отработанное это выпущенные минус те, что ещё в воздухе: этап кончается не
     // на последнем выпущенном слове, а когда поле опустеет (stageDone).
@@ -14563,25 +14581,32 @@
     const q = rules().quota;
     const out = Math.min(stageSpawned, q);
     const total = poolDry ? out : q;
-    el.lap.textContent = String(lap);
-    el.stage.textContent = `${stage + 1}/${STAGES.length}`;
-    el.words.textContent = `${Math.max(0, out - onField)}/${total}`;
 
-    el.combo.textContent = "x" + Math.min(1 + Math.floor(combo / 5), 5) +
-                           (combo > 1 ? " (" + combo + ")" : "");
-    el.lives.textContent = "♥".repeat(Math.max(0, lives)) || "—";
-    el.bombs.textContent = "◆".repeat(bombs) || "—";
-    el.tips.textContent = mods.freeTips ? "∞" : ("?".repeat(tips) || "—");
-    el.shells.textContent = String(shells);
+    return {
+      score: String(score),
+      lap: String(lap),
+      stage: `${stage + 1}/${STAGES.length}`,
+      words: `${Math.max(0, out - onField)}/${total}`,
+      combo: "x" + Math.min(1 + Math.floor(combo / 5), 5) +
+             (combo > 1 ? " (" + combo + ")" : ""),
+      lives: "♥".repeat(Math.max(0, lives)) || "—",
+      bombs: "◆".repeat(bombs) || "—",
+      tips: mods.freeTips ? "∞" : ("?".repeat(tips) || "—"),
+      shells: String(shells),
+      // Техническая сводка — списком строк, а не готовой разметкой: перевод
+      // строки это дело вида, а не правил. Пока скрыта, не собираем вовсе.
+      rules: showRules ? rulesView() : null,
+    };
+  }
 
-    // Из чего сейчас складывается сложность. Спрятано за клавишей 0: игроку это
-    // не нужно, а при разборе баланса нужно всё сразу. Пока скрыто — не собираем.
-    el.rules.style.display = showRules ? "block" : "none";
-    if (!showRules) return;
+  // Из чего сейчас складывается сложность. Спрятано за клавишей 0: игроку это не
+  // нужно, а при разборе баланса нужно всё сразу.
+  function rulesView() {
     const r = rules();
-    el.rules.innerHTML = `${r.name}` +
-      (mods.theme ? `<br>тема: ${THEME_NAMES[mods.theme]}` : "") +
-      `<br>${lenLabel(r)} букв · ${r.gaps} проп.` +
+    return [
+      r.name,
+      ...(mods.theme ? [`тема: ${THEME_NAMES[mods.theme]}`] : []),
+      `${lenLabel(r)} букв · ${r.gaps} проп.`,
       // «выпущено», а не «зачтено» и не «слов». Счётчик показывает, сколько слов
       // этап ВЫПУСТИЛ и не списал, — то есть stageSpawned, а не решённые. Слово
       // «зачтено» это скрывало и прямо вводило в заблуждение: на «зачтено 6/6»
@@ -14592,20 +14617,40 @@
       // должен это слово заново. За честный забег такое случается 2.5 раза, при
       // активном сносе — 16–25. «Выпущено» при этом хотя бы не обещает, что
       // работа сделана.
-      `<br>выпущено ${Math.min(stageSpawned, r.quota)}/${r.quota}` +
-      (needsAim() ? `<br>прицел по букве` : "") +
-      (attract ? `<br>демо` : mods.autopilot ? `<br>автопилот` : "") +
-      `<br>скорость ${Math.round(speedNow())}` +
+      `выпущено ${Math.min(stageSpawned, r.quota)}/${r.quota}`,
+      ...(needsAim() ? ["прицел по букве"] : []),
+      ...(attract ? ["демо"] : mods.autopilot ? ["автопилот"] : []),
+      `скорость ${Math.round(speedNow())}`,
       // Плотность растёт через круг наравне со скоростью, поэтому и показана
       // рядом с ней: иначе половина прибавок происходила бы молча.
-      `<br>плотность ×${loadMul().toFixed(2)}` +
-      `<br>очки ×${(speedNow() / SPEED_PAR * loadMul()).toFixed(2)}` +
+      `плотность ×${loadMul().toFixed(2)}`,
+      `очки ×${(speedNow() / SPEED_PAR * loadMul()).toFixed(2)}`,
       // Улучшение достаётся не всем, поэтому оно должно быть хотя бы названо:
       // строка превращает недостижимое содержимое в заявленную цель.
-      (taken.size
-        ? "<br>" + [...taken].map(id => UPGRADES.find(u => u.id === id).name).join("<br>")
-        : "<br>круг → улучшение");
+      ...(taken.size
+        ? [...taken].map(id => UPGRADES.find(u => u.id === id).name)
+        : ["круг → улучшение"]),
+    ];
   }
+
+  // Единственное место, которое пишет в панель: `el` больше нигде в скрипте не
+  // встречается, только здесь. Кроме этого DOM трогается один раз, при заводке
+  // холста.
+  function paintHud(v) {
+    el.score.textContent = v.score;
+    el.lap.textContent = v.lap;
+    el.stage.textContent = v.stage;
+    el.words.textContent = v.words;
+    el.combo.textContent = v.combo;
+    el.lives.textContent = v.lives;
+    el.bombs.textContent = v.bombs;
+    el.tips.textContent = v.tips;
+    el.shells.textContent = v.shells;
+    el.rules.style.display = v.rules ? "block" : "none";
+    if (v.rules) el.rules.innerHTML = v.rules.join("<br>");
+  }
+
+  function syncHud() { paintHud(hudView()); }
 
   // ---------------------------------------------------------------- ввод
   // Голые модификаторы кнопкой не считаются: Shift, нажатый по дороге к мыши,
