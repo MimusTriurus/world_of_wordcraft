@@ -12652,14 +12652,21 @@
   // автовыдачу, теперь запас приходит только раздачей, и «взял снаряды, а их
   // не прибавилось» было бы обманом.
   //
-  // Поля got («+3 снаряда») здесь больше нет: оно жило ради надписи после
-  // выбора и строки за пройденный круг, а обе убраны. Порция и так стоит на
-  // карточке раздачи — «+3» справа, — то есть игрок видит её ДО выбора, а не
-  // после, что и лучше.
+  // Надписи «+3 снаряда» после выбора нет: порция и так стоит на карточке
+  // раздачи — «+3» справа, — то есть игрок видит её ДО выбора, а не после.
+  //
+  // Поле one — та же порция словами, и нужно оно ровно в одном месте: за
+  // пройденный круг обойма приходит без экрана, и строкой на панели улучшения
+  // игра говорит, что именно пришло. Число берётся из n, чтобы не разъезжалось;
+  // форма слова стоит рядом и рассчитана на нынешние 3 · 1 · 2. Меняешь порцию —
+  // проверь падеж: «+5 снарядов», а не «+5 снаряда».
   const SUPPLIES = [
-    { key: "shells", label: "СНАРЯДЫ",   n: 3, note: "ЛКМ сносит блок целиком" },
-    { key: "bombs",  label: "БОМБЫ",     n: 1, note: "пробел очищает поле" },
-    { key: "tips",   label: "ПОДСКАЗКИ", n: 2, note: "ПКМ читает толкование" },
+    { key: "shells", label: "СНАРЯДЫ",   n: 3, one: "снаряда",
+      note: "ЛКМ сносит блок целиком" },
+    { key: "bombs",  label: "БОМБЫ",     n: 1, one: "бомба",
+      note: "пробел очищает поле" },
+    { key: "tips",   label: "ПОДСКАЗКИ", n: 2, one: "подсказки",
+      note: "ПКМ читает толкование" },
   ];
 
   // Заглушка под мету. Свойства слотов, открываемые между забегами, будут
@@ -13459,7 +13466,10 @@
   // вплотную к единственному интересному. Держать ему нечего — двадцать
   // случаев нехватки снарядов из двадцати двух приходятся на первый круг,
   // где границы круга ещё нет. См. stockUp.
-  const draft = { kind: "supply", index: 0, title: "", cards: [] };
+  // stocked — обойма пришла вместе с этим экраном, сама, без выбора. Так бывает
+  // только на границе круга, и панели надо об этом сказать: иначе три кошелька
+  // просто молча подросли, пока игрок читает улучшения.
+  const draft = { kind: "supply", index: 0, title: "", cards: [], stocked: false };
 
   const draftRows = () => draft.kind === "upgrade" ? draft.cards.length : SUPPLIES.length;
 
@@ -13469,6 +13479,7 @@
     draft.kind = "supply";
     draft.index = 0;
     draft.title = title;
+    draft.stocked = false;
     state = "draft";
   }
 
@@ -13483,6 +13494,7 @@
     draft.kind = "upgrade";
     draft.index = 0;
     draft.title = title;
+    draft.stocked = false;
     state = "draft";
   }
 
@@ -13863,6 +13875,9 @@
     flash = 1;
     syncHud();
     openUpgrade(`КРУГ ${lap - 1} ПРОЙДЕН!`);
+    // После открытия, а не до: openUpgrade сбрасывает флаг, и на пустом пуле
+    // улучшений он же уходит в openDraft, который сбрасывает его тоже.
+    draft.stocked = true;
   }
 
   function loseLife(b) {
@@ -14915,17 +14930,20 @@
   // Экран раздачи. Строки в одну фразу: игра и так нагружает чтение, и абзац
   // на карточке стоил бы дороже, чем даёт. Улучшению нужно больше места —
   // у него иконка и две строки текста.
-  const DRAFT_W = 330, DRAFT_HEAD = 96, DRAFT_FOOT = 44;
+  const DRAFT_W = 330, DRAFT_FOOT = 44;
   const draftStep = () => draft.kind === "upgrade" ? 76 : 62;
+  // Шапка растёт под строку о пополненной обойме, а не поджимает её к рядам:
+  // строк в шапке три вместо двух, и последняя стоит вплотную к первой карточке.
+  const draftHead = () => draft.stocked ? 122 : 96;
 
   function draftTop() {
-    const body = DRAFT_HEAD + draftRows() * draftStep() + DRAFT_FOOT;
+    const body = draftHead() + draftRows() * draftStep() + DRAFT_FOOT;
     return Math.max(6, (H - body) / 2);
   }
 
   function draftRect(i) {
     const step = draftStep();
-    return { x: (W - DRAFT_W) / 2, y: draftTop() + DRAFT_HEAD + i * step,
+    return { x: (W - DRAFT_W) / 2, y: draftTop() + draftHead() + i * step,
              w: DRAFT_W, h: step - 12 };
   }
 
@@ -14940,7 +14958,7 @@
   function drawDraft() {
     const up = draft.kind === "upgrade";
     const top = draftTop();
-    const bottom = top + DRAFT_HEAD + draftRows() * draftStep() + DRAFT_FOOT;
+    const bottom = top + draftHead() + draftRows() * draftStep() + DRAFT_FOOT;
 
     ctx.fillStyle = "rgba(158,173,134,.94)";
     ctx.fillRect(0, top, W, bottom - top);
@@ -14955,9 +14973,16 @@
     ctx.fillStyle = INK;
     ctx.font = "bold 26px 'Courier New', monospace";
     ctx.fillText(draft.title, W / 2, top + 40);
+    // Строка о пополненной обойме идёт второй, сразу за рубежом: это тоже отчёт о
+    // прошедшем, а не указание. Указание — последней строкой, вплотную к рядам.
+    if (draft.stocked) {
+      ctx.font = "bold 13px 'Courier New', monospace";
+      ctx.fillText(SUPPLIES.map(s => `+${s.n} ${s.one}`).join(" · "),
+                   W / 2, top + 68);
+    }
     ctx.font = "13px 'Courier New', monospace";
     ctx.fillText(up ? "выбери улучшение" : "выбери, чем пополнить обойму",
-                 W / 2, top + 66);
+                 W / 2, top + (draft.stocked ? 94 : 66));
 
     for (let i = 0; i < draftRows(); i++) {
       const r = draftRect(i), on = i === draft.index;
