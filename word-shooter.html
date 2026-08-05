@@ -13817,8 +13817,15 @@
 
   // Этап отработал: квота выпущена (или слова кончились) и поле опустело.
   // Пока поле не чистое, следующий этап не начинается — этапы не смешиваются.
+  //
+  // Пусто здесь означает «блоков нет вовсе», а не «нет живых». Решённое и
+  // снесённое слово держится на поле ещё 0.45 с, догорая, но его часы идут только
+  // в состоянии play: раздача, поднятая на условии !some(alive), замораживала
+  // последнее слово на полувспышке и оставляла его торчать за панелью до самого
+  // выбора. Лишние 0.45 с ожидания покупают чистое поле под окном и целую
+  // анимацию последнему слову этапа.
   const stageDone = () =>
-    (stageSpawned >= rules().quota || poolDry) && !blocks.some(alive);
+    (stageSpawned >= rules().quota || poolDry) && !blocks.length;
 
   function nextStage() {
     if (stage >= STAGES.length - 1) { nextLap(); return; }
@@ -13827,7 +13834,7 @@
     dropBag();
     flash = 1;
     syncHud();
-    openDraft(`ЭТАП ${stage} ПРОЙДЕН`);   // stage уже увеличен, пройден предыдущий
+    openDraft(`ЭТАП ${stage} ПРОЙДЕН!`);  // stage уже увеличен, пройден предыдущий
   }
 
   // Все этапы пройдены — забег заходит на новый круг, весь целиком и быстрее.
@@ -13855,7 +13862,7 @@
     stockUp();
     flash = 1;
     syncHud();
-    openUpgrade(`КРУГ ${lap - 1} ПРОЙДЕН`);
+    openUpgrade(`КРУГ ${lap - 1} ПРОЙДЕН!`);
   }
 
   function loseLife(b) {
@@ -14940,12 +14947,17 @@
     ctx.strokeStyle = INK; ctx.lineWidth = 2;
     ctx.strokeRect(0, top, W, bottom - top);
 
+    // Крупно — то, что игрок сделал, мелко — что от него теперь хотят. Раньше
+    // было наоборот: «В ОБОЙМУ» кеглем 26, «ЭТАП 1 ПРОЙДЕН» тринадцатым под ним.
+    // Назначение экрана и так читается по трём строкам с иконками и порциями, а
+    // взятый рубеж больше нигде не объявляется — панель этапов не считает.
     ctx.textAlign = "center";
     ctx.fillStyle = INK;
     ctx.font = "bold 26px 'Courier New', monospace";
-    ctx.fillText(up ? "УЛУЧШЕНИЕ" : "В ОБОЙМУ", W / 2, top + 40);
+    ctx.fillText(draft.title, W / 2, top + 40);
     ctx.font = "13px 'Courier New', monospace";
-    ctx.fillText(draft.title, W / 2, top + 66);
+    ctx.fillText(up ? "выбери улучшение" : "выбери, чем пополнить обойму",
+                 W / 2, top + 66);
 
     for (let i = 0; i < draftRows(); i++) {
       const r = draftRect(i), on = i === draft.index;
